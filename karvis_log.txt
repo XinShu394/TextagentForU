@@ -1,0 +1,4 @@
+17:13:28 [Init] 系统目录已就绪: d:\腾讯\KarvisForYou-main\KarvisForYou-main\data\_karvis_system
+17:13:28 [Init] 活跃渠道: ['wework']
+17:13:28 [ChannelRouter] 渠道已注册: wework
+17:13:28 [Scheduler][V8] 已启动 8 个任务 (待办心跳=1min, 调度心跳=30min, 固定=5, 每日初始化=05:00)

@@ -256,16 +256,46 @@ def _select_model_tier(payload, is_system_action=False, action=None):
     """
     根据请求类型选择模型层级。
     Returns: "flash" | "main" | "think"
+    
+    优化策略：
+    - 简单消息（短文本、常见指令）→ Flash（<1秒响应）
+    - 复杂请求（长文本、需要深度理解）→ Main（3-8秒）
+    - 深度分析 → Think（启用 thinking）
     """
     if is_system_action:
         if action in ("morning_report", "evening_checkin",
-                       "daily_report", "weekly_review", "monthly_review"):
+                       "daily_report", "weekly_report", "monthly_review"):
             return "main"
         if action == "companion_check":
             return "flash"
         return "main"
 
-    # 用户消息: 走 Main（一次调用完成分类+回复）
+    # 用户消息: 根据内容复杂度智能路由
+    user_text = ""
+    msg_type = payload.get("type", "")
+    
+    if msg_type == "text":
+        user_text = payload.get("text", "")
+    elif msg_type == "voice":
+        user_text = payload.get("asr_text", "")
+    
+    # 短消息（<50字）且不含复杂指令 → Flash 快速响应
+    if len(user_text) < 50:
+        # 需要复杂处理的关键词
+        complex_keywords = [
+            "分析", "总结", "回顾", "深度", "报告", "建议", 
+            "为什么", "怎么办", "如何", "帮我想", "帮我规划",
+            "决策", "复盘", "归档", "整理", "搜索",
+            "读书笔记", "影视笔记", "微习惯", "实验",
+        ]
+        has_complex = any(kw in user_text for kw in complex_keywords)
+        
+        if not has_complex:
+            # 简单指令，用 Flash 快速处理
+            _log(f"[Brain] 模型路由: 短消息({len(user_text)}字) → Flash")
+            return "flash"
+    
+    # 默认走 Main
     return "main"
 
 
@@ -758,34 +788,80 @@ def process(payload, send_fn=None, ctx=None):
         _update_nudge_state(state)
 
     # 5. 构建 prompt 并调用 LLM（prompt_futs 在步骤 1 已提交，此处直接取结果）
-    system_prompt = build_system_prompt(state, ctx, prompt_futs=prompt_futs, payload=payload)
-    t_prompt = _time.time()
-    _log(f"[Brain][耗时] prompt组装: {t_prompt - t_state:.1f}s (prompt长度={len(system_prompt)})")
-
-    user_message = _build_user_message(payload)
-
     # 多模型路由：根据请求类型选择模型层级
     is_system = payload.get("type") == "system"
     action = payload.get("action", "") if is_system else None
     model_tier = _select_model_tier(payload, is_system_action=is_system, action=action)
     _log(f"[Brain] 模型路由: tier={model_tier}, is_system={is_system}, action={action}")
 
-    llm_response = call_llm([
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message}
-    ], model_tier=model_tier)
-    t_llm = _time.time()
-    _log(f"[Brain][耗时] LLM调用({model_tier}): {t_llm - t_prompt:.1f}s")
+    # V13: Flash 快速响应模式 - 使用精简 Prompt
+    goto_skill_exec = False  # 标记是否跳过完整 LLM 调用，直接执行 skill
+    decision = None
+    
+    if model_tier == "flash" and not is_system:
+        # 检查是否在打卡/反思状态，如果是则强制用 Main
+        if state.get("checkin_pending") or state.get("reflect_pending"):
+            _log("[Brain] 检测到打卡/反思状态，升级到 Main 模型")
+            model_tier = "main"
+        else:
+            # 使用精简 Prompt 快速处理
+            flash_prompt = prompts.FLASH_QUICK_PROMPT
+            nickname = ctx.get_nickname() if ctx else None
+            if nickname:
+                flash_prompt += f"\n\n称呼用户为「{nickname}」"
+            
+            llm_response = call_llm([
+                {"role": "system", "content": flash_prompt},
+                {"role": "user", "content": user_text}
+            ], model_tier="flash", max_tokens=200)
+            t_llm = _time.time()
+            _log(f"[Brain][耗时] Flash快速响应: {t_llm - t_state:.1f}s")
+            
+            if llm_response:
+                decision = _parse_llm_output(llm_response)
+                if decision:
+                    skill = decision.get("skill", "")
+                    # chat 和 ignore 直接返回回复
+                    if skill in ("chat", "ignore"):
+                        reply = decision.get("reply", "")
+                        if reply:
+                            add_message_to_state(state, "assistant", reply)
+                            write_state_and_update_cache(state, ctx)
+                            return {"reply": reply}
+                    
+                    # 其他 skill 需要完整处理
+                    _log(f"[Brain] Flash 识别到 skill={skill}，继续完整处理")
+                    # 跳到 step 8 执行 skill
+                    t_prompt = t_llm
+                    goto_skill_exec = True
+                else:
+                    _log("[Brain] Flash JSON 解析失败，降级到完整处理")
+            else:
+                _log("[Brain] Flash 调用失败，降级到完整处理")
+    
+    if not goto_skill_exec:
+        system_prompt = build_system_prompt(state, ctx, prompt_futs=prompt_futs, payload=payload)
+        t_prompt = _time.time()
+        _log(f"[Brain][耗时] prompt组装: {t_prompt - t_state:.1f}s (prompt长度={len(system_prompt)})")
 
-    if not llm_response:
-        _log("[Brain] LLM 返回空，降级处理")
-        # Quick-Notes 统一写入
-        if payload.get("type") != "system":
-            _save_to_quick_notes(payload, state, ctx)
-        return {"reply": "已记录到 Obsidian（AI 暂时不可用）"}
+        user_message = _build_user_message(payload)
 
-    # 6. 解析 LLM 输出
-    decision = _parse_llm_output(llm_response)
+        llm_response = call_llm([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ], model_tier=model_tier)
+        t_llm = _time.time()
+        _log(f"[Brain][耗时] LLM调用({model_tier}): {t_llm - t_prompt:.1f}s")
+
+        if not llm_response:
+            _log("[Brain] LLM 返回空，降级处理")
+            # Quick-Notes 统一写入
+            if payload.get("type") != "system":
+                _save_to_quick_notes(payload, state, ctx)
+            return {"reply": "已记录到 Obsidian（AI 暂时不可用）"}
+
+        # 6. 解析 LLM 输出
+        decision = _parse_llm_output(llm_response)
     if not decision:
         _log(f"[Brain] JSON 解析失败，原始: {llm_response[:300]}")
         if payload.get("type") != "system":

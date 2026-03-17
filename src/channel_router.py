@@ -72,14 +72,87 @@ def clear_user_channel_cache(user_id=None):
 
 # ============ 统一发送 ============
 
-def send_message(user_id, text):
-    """统一发送入口 — 根据用户 channel 自动路由"""
+def send_message(user_id, text, msg_type="text", **kwargs):
+    """
+    统一发送入口 — 根据用户 channel 自动路由
+    
+    Args:
+        user_id: 用户 ID
+        text: 消息内容
+        msg_type: 消息类型 ("text", "markdown", "textcard", "button_card")
+        **kwargs: 额外参数（如 url, buttons 等）
+    """
     channel = get_user_channel(user_id)
+    
+    # 企业微信渠道支持富文本
+    if channel == "wework" and msg_type != "text":
+        try:
+            from wework_rich_message import (
+                send_markdown, send_textcard, send_button_card, smart_send
+            )
+            
+            if msg_type == "markdown":
+                return send_markdown(user_id, text)
+            elif msg_type == "textcard":
+                url = kwargs.get("url", "")
+                btntxt = kwargs.get("btntxt", "详情")
+                title = kwargs.get("title", "消息")
+                return send_textcard(user_id, title, text, url, btntxt)
+            elif msg_type == "button_card":
+                buttons = kwargs.get("buttons", [])
+                title = kwargs.get("title", "请选择")
+                result = send_button_card(user_id, title, text, buttons)
+                return result.get("ok", False)
+            elif msg_type == "smart":
+                url = kwargs.get("url")
+                buttons = kwargs.get("buttons")
+                return smart_send(user_id, text, url=url, buttons=buttons)
+        except ImportError as e:
+            _log(f"导入富文本模块失败: {e}，回退到纯文本")
+    
+    # 默认纯文本发送
     fn = _channels.get(channel)
     if fn:
         return fn(user_id, text)
     _log(f"未知渠道 {channel} for user {user_id}, 已注册渠道: {list(_channels.keys())}")
     return False
+
+
+def send_rich_message(user_id, content, url=None, buttons=None, title=None):
+    """
+    发送富文本消息的便捷方法
+    
+    根据参数自动选择最佳消息类型：
+    - 有 buttons → 按钮卡片
+    - 有 url → 文本卡片
+    - 有 Markdown 格式 → Markdown 消息
+    - 其他 → 纯文本
+    
+    Args:
+        user_id: 用户 ID
+        content: 消息内容
+        url: 可选，跳转链接
+        buttons: 可选，按钮列表 [{"key": "...", "name": "..."}, ...]
+        title: 可选，卡片标题
+    """
+    channel = get_user_channel(user_id)
+    
+    if channel == "wework":
+        try:
+            from wework_rich_message import smart_send, send_textcard, send_button_card
+            
+            if buttons:
+                result = send_button_card(user_id, title or "请选择", content, buttons)
+                return result.get("ok", False)
+            elif url:
+                return send_textcard(user_id, title or "查看详情", content, url)
+            else:
+                return smart_send(user_id, content)
+        except ImportError:
+            pass
+    
+    # 回退到纯文本
+    return send_message(user_id, content)
 
 
 def send_alert(text):

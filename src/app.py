@@ -536,6 +536,21 @@ _FEATURE_INTRO = (
     "💡 有任何问题，直接发消息给我就好~"
 )
 
+# Markdown 版功能介绍（用于发送富文本消息）
+_FEATURE_INTRO_MARKDOWN = """**🤖 我是你的 AI 生活助手**
+
+以下是我的全部功能：
+
+> 📝 **记录** — 发任何内容，我帮你自动归档
+> ✅ **待办** — 说「提醒我…」到时间自动提醒
+> 📰 **日报** — 说「今日日报」总结今天记录
+> 🔄 **打卡** — 说「打卡」开始每日复盘
+> 🌤️ **天气** — 说「天气」查看今日天气
+> ⚙️ **设置** — 说「叫我XX」改昵称
+> 📊 **数据** — 说「导出数据」查看记录
+
+<font color="info">💡 有任何问题，直接发消息给我就好~</font>"""
+
 def create_wework_menu():
     """
     通过企微 API 创建/更新自定义菜单。
@@ -631,8 +646,8 @@ def handle_message(msg, user_id):
 
         if event == 'CLICK':
             if event_key == 'MENU_FEATURES':
-                # 「查看功能」按钮 → 直接发送功能介绍
-                channel_router.send_message(user_id, _FEATURE_INTRO)
+                # 「查看功能」按钮 → 发送 Markdown 格式功能介绍
+                channel_router.send_message(user_id, _FEATURE_INTRO_MARKDOWN, msg_type="markdown")
                 return
             elif event_key == 'MENU_WEB_LINK':
                 # 「数据总览」按钮 → 转为"给我查看链接"，复用 web.token skill
@@ -662,13 +677,13 @@ def handle_message(msg, user_id):
         # 新用户欢迎消息
         if is_new:
             _log(f"[handle_message] 新用户 {user_id}，发送欢迎消息")
-            welcome = (
-                "嗨～我是你的 AI 生活助手 🤖\n"
-                "住在企业微信里，随时为你服务。\n\n"
-                "先认识一下吧，你希望我怎么称呼你？\n"
-                "（直接说「叫我XX」就好~）"
-            )
-            channel_router.send_message(user_id, welcome)
+            welcome_md = """**嗨～我是你的 AI 生活助手** 🤖
+
+住在企业微信里，随时为你服务。
+
+先认识一下吧，你希望我怎么称呼你？
+<font color="info">（直接说「叫我XX」就好~）</font>"""
+            channel_router.send_message(user_id, welcome_md, msg_type="markdown")
             # 通知管理员有新用户注册
             from config import ADMIN_USER_ID
             if ADMIN_USER_ID and user_id != ADMIN_USER_ID:
@@ -889,8 +904,18 @@ def wework():
         timestamp = request.args.get('timestamp', '')
         nonce = request.args.get('nonce', '')
         echostr = request.args.get('echostr', '')
+        _log(f"[企微验证] 收到GET请求: msg_signature={msg_signature}, timestamp={timestamp}, nonce={nonce}, echostr={echostr[:20]}...")
         reply = wx_crypt.verify_url(msg_signature, timestamp, nonce, echostr)
-        return reply if reply else "verify failed"
+        if reply:
+            _log(f"[企微验证] 验证成功，返回: {reply}")
+            # 企微要求返回纯文本格式的解密后 echostr
+            from flask import make_response
+            resp = make_response(str(reply))
+            resp.headers['Content-Type'] = 'text/plain'
+            return resp
+        else:
+            _log(f"[企微验证] 验证失败")
+            return "verify failed", 403
 
     if request.method == 'POST':
         try:
