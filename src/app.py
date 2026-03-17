@@ -2297,14 +2297,14 @@ if __name__ == '__main__':
     # 企微渠道
     channel_router.register_channel("wework", send_wework_message)
 
-    # ============ 同步自定义菜单 ============
-    def _sync_menu_on_startup():
-        """启动后延迟 3 秒同步菜单，避免阻塞主线程"""
-        time.sleep(3)
-        _log("[Init] 开始同步企微自定义菜单...")
-        create_wework_menu()
-
-    threading.Thread(target=_sync_menu_on_startup, daemon=True).start()
+    # ============ 同步自定义菜单（暂时禁用）============
+    # def _sync_menu_on_startup():
+    #     """启动后延迟 3 秒同步菜单，避免阻塞主线程"""
+    #     time.sleep(3)
+    #     _log("[Init] 开始同步企微自定义菜单...")
+    #     create_wework_menu()
+    # threading.Thread(target=_sync_menu_on_startup, daemon=True).start()
+    _log("[Init] 自定义菜单同步已禁用")
 
     _setup_builtin_scheduler()
     app.run(host='0.0.0.0', port=SERVER_PORT, threaded=True)
