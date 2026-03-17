@@ -74,7 +74,7 @@ SKILL_PROMPT_LINES = {
     "settings.soul": '**settings.soul** `{style, mode?}` — 设置 AI 说话风格（mode: set=覆盖, append=在原有基础上追加, reset=恢复默认。用户说"活泼一点/正式一些"→set；"再幽默一点"→append；"恢复默认风格"→reset）',
     "settings.info": '**settings.info** `{info, category?}` — 记录用户个人信息（category: occupation/city/pets/people/other。用户说"我是做设计的"→category=occupation；"我养了一只猫叫花花"→category=pets）',
     "settings.skills": '**settings.skills** `{action, skill_names?}` — 管理功能开关（action: list=查看所有功能, enable=开启, disable=关闭。用户说"我有什么功能"→list；"关掉决策追踪"→disable；"开启读书笔记"→enable）',
-    "web.token": '**web.token** `{}` — 生成 Web 数据查看链接（用户说"给我查看链接"、"我要看我的数据"、"怎么看笔记"时触发）',
+    "web.token": '**web.token** `{}` — 生成 Web 数据查看链接（用户说"给我查看链接"、"我要看我的数据"、"怎么看笔记"、"我的记录"、"打开网页"、"看我的数据"、"查看我的信息"、"数据链接"时触发）',
     "data.export": '**data.export** `{}` — 导出用户所有数据（用户说"导出我的数据"、"给我所有信息"、"我要带走我的数据"、"数据迁移"时触发）',
     "data.destroy": '**data.destroy** `{confirm?}` — 销毁用户所有数据（用户说"删除我的所有数据"、"销毁我的账号"、"清除我的信息"时触发；用户确认销毁时 confirm=true）',
     "dynamic": '**dynamic** `{actions: [{op, path, value?}...]}` — 通用状态操作引擎。当现有 skill 无法精确匹配用户意图时（如修改实验时间、纠正某个字段、记录自定义数据），直接用原子操作处理。\n  可用 op: `state.set`(改值) / `state.delete`(删字段) / `state.push`(追加到数组) / `file.write`(写文件) / `file.append`(追加文件)\n  state 可操作字段: active_experiment.* / experiment_history / daily_top3 / active_book / active_media / pending_decisions / decision_history / custom.*\n  示例: 用户说"实验推迟到三月" → `{"actions":[{"op":"state.set","path":"active_experiment.start_date","value":"2026-03-01"},{"op":"state.set","path":"active_experiment.end_date","value":"2026-03-08"}]}`\n  ⚠️ 优先用已有 skill（如 habit.propose、todo.add），dynamic 是兜底。',
@@ -131,7 +131,7 @@ RULES_CORE = """# 决策规则
 - 注意：以上设置类触发词出现在普通聊天中时也要识别，但如果是在讲述别人的事（如"他叫小明"）则不触发
 
 ## Web 查看链接
-- 用户说"给我查看链接"、"我要看我的数据"、"看看我的笔记"、"查看链接"、"怎么查看数据" → `web.token`
+- 用户说"给我查看链接"、"我要看我的数据"、"看看我的笔记"、"查看链接"、"怎么查看数据"、"我的记录"、"打开网页"、"看我的数据"、"查看我的信息"、"数据链接"、"我想看我的所有数据" → `web.token`
 - 不需要任何参数，直接调用即可
 
 ## 数据导出
