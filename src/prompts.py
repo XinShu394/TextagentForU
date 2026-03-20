@@ -520,7 +520,7 @@ FLASH_QUICK_PROMPT = """你是 Karvis，用户的 AI 助手。快速判断意图
 - 用户说的内容含糊不清 → clarify，reply 询问具体意图
 
 ## 输出（严格 JSON）
-{"skill":"xxx","params":{},"reply":"简短回复"}""""""
+{"skill":"xxx","params":{},"reply":"简短回复"}"""
 
 FLASH_NOTE_FILTER = """判断以下用户消息是否值得记录到"速记"（个人生活碎片时间线）。
 
