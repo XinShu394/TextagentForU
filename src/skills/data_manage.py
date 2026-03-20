@@ -1,268 +1,348 @@
 # -*- coding: utf-8 -*-
 """
-KarvisForAll 用户数据管理
-提供数据导出和数据销毁功能。
+Skill: data.*
+用户数据管理：导出和销毁
 """
-import os
 import sys
 import json
-import time
+import os
 from datetime import datetime, timezone, timedelta
 
-_BEIJING_TZ = timezone(timedelta(hours=8))
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 def _log(msg):
-    ts = datetime.now(_BEIJING_TZ).strftime("%H:%M:%S")
-    print(f"{ts} {msg}", file=sys.stderr, flush=True)
+    print(msg, file=sys.stderr, flush=True)
 
 
-# ============ 数据导出 ============
-
-# 单文件最大读取字符数
-_MAX_FILE_CHARS = 5000
-# 总导出最大字符数
-_MAX_TOTAL_CHARS = 50000
-
-
-def _read_text_safe(io_backend, path, max_chars=_MAX_FILE_CHARS):
-    """安全读取文本文件，超长截断"""
-    try:
-        content = io_backend.read_text(path)
-        if content and len(content) > max_chars:
-            content = content[:max_chars] + f"\n\n... (已截断，原文共 {len(content)} 字符)"
-        return content or ""
-    except Exception as e:
-        _log(f"[DataManage] 读取文件失败 {path}: {e}")
-        return ""
-
-
-def _collect_notes_from_dir(io_backend, dir_path, label):
-    """从笔记目录收集所有 .md 文件内容"""
-    sections = []
-    try:
-        if not os.path.isdir(dir_path):
-            return ""
-        for filename in sorted(os.listdir(dir_path)):
-            if not filename.endswith(".md"):
-                continue
-            filepath = os.path.join(dir_path, filename)
-            content = _read_text_safe(io_backend, filepath, max_chars=2000)
-            if content:
-                sections.append(f"### {filename}\n{content}")
-    except Exception as e:
-        _log(f"[DataManage] 遍历目录失败 {dir_path}: {e}")
-    if sections:
-        return f"\n## {label}\n\n" + "\n\n---\n\n".join(sections)
-    return ""
+def _now_str():
+    return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def export_user_data(params, state, ctx):
     """
     导出用户所有数据，以结构化文本形式返回。
+    便于用户迁移数据到其他 AI 平台。
+    
+    导出范围:
+    - 用户配置信息（昵称、AI名、偏好等）
+    - 长期记忆（memory.md）
+    - 快速笔记（Quick-Notes.md）
+    - 待办事项（state 中的 todos）
+    - 各类归档笔记（读书、影视、情感、生活趣事等）
+    - 日报记录
     """
-    _log(f"[DataManage] 开始导出用户数据: {ctx.user_id}")
-
-    parts = []
-    total_chars = 0
-
-    # 1. 用户配置信息
-    config = ctx.get_user_config()
-    config_text = (
-        f"# 📋 用户数据导出\n\n"
-        f"**导出时间**: {datetime.now(_BEIJING_TZ).strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"**用户 ID**: {ctx.user_id}\n\n"
-        f"---\n\n"
-        f"## 基本信息\n\n"
-        f"- **昵称**: {config.get('nickname', '未设置')}\n"
-        f"- **AI 名字**: {config.get('ai_name', 'Karvis')}\n"
-        f"- **渠道**: {config.get('channel', 'wework')}\n"
-        f"- **个人信息**: {json.dumps(config.get('info', {}), ensure_ascii=False)}\n"
-        f"- **偏好设置**: {json.dumps(config.get('preferences', {}), ensure_ascii=False)}\n"
-    )
-    parts.append(config_text)
-    total_chars += len(config_text)
-
-    # 2. 长期记忆
-    memory = _read_text_safe(ctx.IO, ctx.memory_file)
-    if memory:
-        section = f"\n## 长期记忆\n\n{memory}"
-        parts.append(section)
-        total_chars += len(section)
-
-    # 3. 快速笔记
-    quick_notes = _read_text_safe(ctx.IO, ctx.quick_notes_file)
-    if quick_notes:
-        section = f"\n## 快速笔记\n\n{quick_notes}"
-        parts.append(section)
-        total_chars += len(section)
-
-    # 4. 待办事项
-    todo = _read_text_safe(ctx.IO, ctx.todo_file)
-    if todo:
-        section = f"\n## 待办事项\n\n{todo}"
-        parts.append(section)
-        total_chars += len(section)
-
-    # 5. 状态数据（待办提醒、习惯实验、决策追踪等）
     try:
-        state_content = ctx.IO.read_text(ctx.state_file)
-        if state_content:
-            state_data = json.loads(state_content)
-            # 提取关键信息
-            state_parts = []
-            if state_data.get("active_experiment"):
-                state_parts.append(f"- **活跃实验**: {json.dumps(state_data['active_experiment'], ensure_ascii=False)}")
-            if state_data.get("pending_decisions"):
-                state_parts.append(f"- **待复盘决策**: {json.dumps(state_data['pending_decisions'], ensure_ascii=False)}")
-            if state_data.get("mood_scores"):
-                scores = state_data["mood_scores"][-30:]  # 最近30天
-                state_parts.append(f"- **近期情绪评分**: {json.dumps(scores, ensure_ascii=False)}")
-            if state_data.get("checkin_stats"):
-                state_parts.append(f"- **打卡统计**: {json.dumps(state_data['checkin_stats'], ensure_ascii=False)}")
-            if state_parts:
-                section = "\n## 状态数据\n\n" + "\n".join(state_parts)
-                parts.append(section)
-                total_chars += len(section)
-    except Exception as e:
-        _log(f"[DataManage] 读取状态文件失败: {e}")
-
-    # 6. 碎碎念
-    misc = _read_text_safe(ctx.IO, ctx.misc_file)
-    if misc:
-        section = f"\n## 碎碎念\n\n{misc}"
-        parts.append(section)
-        total_chars += len(section)
-
-    # 7. 各分类笔记（如果总量还不超限）
-    if total_chars < _MAX_TOTAL_CHARS:
-        note_dirs = [
-            (ctx.book_notes_dir, "📖 读书笔记"),
-            (ctx.media_notes_dir, "🎬 影视笔记"),
-            (ctx.work_notes_dir, "💼 工作笔记"),
-            (ctx.emotion_notes_dir, "💝 情感日记"),
-            (ctx.fun_notes_dir, "😄 生活趣事"),
-            (ctx.voice_journal_dir, "🎙️ 语音日记"),
+        _log(f"[data.export] 开始导出用户数据: {ctx.user_id}")
+        
+        parts = []
+        parts.append("# 📦 Karvis 数据导出")
+        parts.append(f"导出时间: {_now_str()}")
+        parts.append(f"用户 ID: {ctx.user_id}")
+        parts.append("")
+        
+        # 1. 用户配置
+        config = ctx.get_user_config()
+        parts.append("## 👤 用户配置")
+        parts.append(f"- 昵称: {config.get('nickname', '未设置')}")
+        parts.append(f"- AI 名字: {config.get('ai_name', 'Karvis')}")
+        parts.append(f"- 存储模式: {config.get('storage_mode', 'local')}")
+        
+        # 偏好设置
+        prefs = config.get('preferences', {})
+        if prefs:
+            parts.append("- 偏好设置:")
+            for k, v in prefs.items():
+                parts.append(f"  - {k}: {v}")
+        
+        # 用户信息
+        info = config.get('info', {})
+        if info:
+            parts.append("- 个人信息:")
+            for k, v in info.items():
+                parts.append(f"  - {k}: {v}")
+        parts.append("")
+        
+        # 2. 长期记忆
+        parts.append("## 🧠 长期记忆")
+        memory_content = ctx.IO.read_text(ctx.memory_file)
+        if memory_content:
+            # 截断过长内容
+            if len(memory_content) > 10000:
+                memory_content = memory_content[:10000] + "\n\n...(内容过长，已截断)..."
+            parts.append(memory_content)
+        else:
+            parts.append("(暂无长期记忆)")
+        parts.append("")
+        
+        # 3. 快速笔记
+        parts.append("## 📝 快速笔记")
+        notes_content = ctx.IO.read_text(ctx.quick_notes_file)
+        if notes_content:
+            if len(notes_content) > 15000:
+                notes_content = notes_content[:15000] + "\n\n...(内容过长，已截断)..."
+            parts.append(notes_content)
+        else:
+            parts.append("(暂无快速笔记)")
+        parts.append("")
+        
+        # 4. 待办事项
+        parts.append("## ✅ 待办事项")
+        todos = state.get("todos", [])
+        if todos:
+            parts.append("### 进行中")
+            for i, t in enumerate(todos, 1):
+                content = t.get("content", "")
+                recur = t.get("recur", "")
+                remind = t.get("remind_at", "")
+                due = t.get("due_date", "")
+                
+                line = f"{i}. {content}"
+                if recur:
+                    line += f" 🔁 {recur}"
+                if remind:
+                    line += f" ⏰ {remind}"
+                if due:
+                    line += f" 📅 {due}"
+                parts.append(line)
+        
+        # 从 Todo.md 获取已完成的待办
+        todo_content = ctx.IO.read_text(ctx.todo_file)
+        if todo_content and "## 已完成" in todo_content:
+            done_section = todo_content.split("## 已完成")[1]
+            done_lines = [l for l in done_section.split("\n") if l.strip().startswith("- [x]")]
+            if done_lines:
+                parts.append("\n### 已完成")
+                for line in done_lines[:20]:  # 最多显示 20 条
+                    parts.append(line)
+                if len(done_lines) > 20:
+                    parts.append(f"...(共 {len(done_lines)} 条)")
+        
+        if not todos and not (todo_content and "- [x]" in todo_content):
+            parts.append("(暂无待办事项)")
+        parts.append("")
+        
+        # 5. 归档笔记
+        parts.append("## 📂 归档笔记")
+        
+        # 遍历 02-Notes 目录
+        notes_dir = os.path.join(ctx.user_dir, "02-Notes") if ctx.storage_mode == "local" else "02-Notes"
+        
+        categories = [
+            ("读书笔记", "📚"),
+            ("影视笔记", "🎬"),
+            ("工作笔记", "💼"),
+            ("情感日记", "💭"),
+            ("生活趣事", "🎉"),
+            ("语音日记", "🎤"),
         ]
-        for dir_path, label in note_dirs:
-            if total_chars >= _MAX_TOTAL_CHARS:
-                parts.append(f"\n\n⚠️ 数据量较大，已达到单次导出上限（{_MAX_TOTAL_CHARS} 字符）。")
+        
+        total_chars = len("\n".join(parts))
+        max_total_chars = 50000  # 总导出限制
+        
+        for cat_name, cat_emoji in categories:
+            if total_chars > max_total_chars:
+                parts.append(f"\n(内容已达上限，剩余分类已省略)")
                 break
-            section = _collect_notes_from_dir(ctx.IO, dir_path, label)
-            if section:
-                parts.append(section)
-                total_chars += len(section)
-
-    # 8. 日报
-    if total_chars < _MAX_TOTAL_CHARS:
-        daily_section = _collect_notes_from_dir(ctx.IO, ctx.daily_notes_dir, "📅 日报记录")
-        if daily_section:
-            parts.append(daily_section)
-            total_chars += len(daily_section)
-
-    full_text = "\n".join(parts)
-    _log(f"[DataManage] 数据导出完成: {ctx.user_id}, 总字符数={len(full_text)}")
-
-    return {
-        "success": True,
-        "reply": full_text,
-    }
-
-
-# ============ 数据销毁 ============
-
-# 确认超时时间（秒）
-_DESTROY_CONFIRM_TIMEOUT = 300  # 5 分钟
+            
+            cat_dir = os.path.join(notes_dir, cat_name) if ctx.storage_mode == "local" else f"{notes_dir}/{cat_name}"
+            
+            try:
+                if ctx.storage_mode == "local":
+                    if os.path.exists(cat_dir):
+                        files = [f for f in os.listdir(cat_dir) if f.endswith('.md')]
+                    else:
+                        files = []
+                else:
+                    # OneDrive 模式
+                    files = ctx.IO.list_files(cat_dir) or []
+                
+                if files:
+                    parts.append(f"\n### {cat_emoji} {cat_name}")
+                    for fname in files[:10]:  # 每类最多 10 个文件
+                        fpath = os.path.join(cat_dir, fname) if ctx.storage_mode == "local" else f"{cat_dir}/{fname}"
+                        content = ctx.IO.read_text(fpath)
+                        if content:
+                            if len(content) > 3000:
+                                content = content[:3000] + "\n...(已截断)"
+                            parts.append(f"\n#### {fname}")
+                            parts.append(content)
+                            total_chars += len(content)
+                            if total_chars > max_total_chars:
+                                break
+                    
+                    if len(files) > 10:
+                        parts.append(f"...(该分类共 {len(files)} 个文件)")
+            except Exception as e:
+                _log(f"[data.export] 读取 {cat_name} 失败: {e}")
+        
+        parts.append("")
+        
+        # 6. 日报（最近 7 天）
+        parts.append("## 📊 近期日报")
+        daily_dir = os.path.join(ctx.user_dir, "01-Daily") if ctx.storage_mode == "local" else "01-Daily"
+        
+        try:
+            if ctx.storage_mode == "local":
+                if os.path.exists(daily_dir):
+                    daily_files = sorted([f for f in os.listdir(daily_dir) if f.endswith('.md')], reverse=True)[:7]
+                else:
+                    daily_files = []
+            else:
+                daily_files = sorted(ctx.IO.list_files(daily_dir) or [], reverse=True)[:7]
+            
+            if daily_files:
+                for fname in daily_files:
+                    fpath = os.path.join(daily_dir, fname) if ctx.storage_mode == "local" else f"{daily_dir}/{fname}"
+                    content = ctx.IO.read_text(fpath)
+                    if content:
+                        if len(content) > 2000:
+                            content = content[:2000] + "\n...(已截断)"
+                        parts.append(f"\n### {fname}")
+                        parts.append(content)
+            else:
+                parts.append("(暂无日报记录)")
+        except Exception as e:
+            _log(f"[data.export] 读取日报失败: {e}")
+            parts.append("(读取日报失败)")
+        
+        parts.append("")
+        parts.append("---")
+        parts.append("导出完成。如需完整数据备份，请联系管理员。")
+        
+        result_text = "\n".join(parts)
+        _log(f"[data.export] 导出完成: {len(result_text)} 字符")
+        
+        return {
+            "success": True,
+            "reply": result_text
+        }
+        
+    except Exception as e:
+        _log(f"[data.export] 导出失败: {e}")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return {
+            "success": False,
+            "reply": f"数据导出失败: {str(e)}"
+        }
 
 
 def destroy_user_data(params, state, ctx):
     """
-    销毁用户所有数据。需要二次确认。
-    第一次调用：设置 pending_destroy 标记，提示用户确认。
-    确认后再次调用（confirm=true）：执行实际删除。
+    销毁用户所有数据。需要二次确认机制。
+    
+    params:
+        confirm: bool - 用户是否已确认销毁
+    
+    流程:
+    1. 第一次调用（无 confirm）：设置 pending_destroy，提示用户确认
+    2. 用户确认后再次调用（confirm=true）：执行实际删除
     """
-    confirm = params.get("confirm", False)
-    nickname = ctx.get_nickname() or "朋友"
-
-    # 管理员不允许自我销毁
-    if ctx.is_admin:
+    from config import ADMIN_USER_ID
+    
+    # 安全检查：管理员账号不允许自我销毁
+    if ctx.user_id == ADMIN_USER_ID:
         return {
             "success": False,
-            "reply": "管理员账号不支持数据销毁操作，请通过后台管理。",
+            "reply": "管理员账号不支持自我销毁，请通过其他方式管理数据。"
         }
-
+    
+    confirm = params.get("confirm", False)
+    pending = state.get("pending_destroy", {})
+    
     if not confirm:
-        # 第一次调用 — 设置确认标记
-        pending = {
+        # 第一次调用：设置待确认状态
+        _log(f"[data.destroy] 用户请求销毁数据: {ctx.user_id}")
+        
+        state["pending_destroy"] = {
             "pending": True,
-            "requested_at": time.time(),
+            "requested_at": _now_str(),
         }
+        
         return {
             "success": True,
             "reply": (
-                f"⚠️ {nickname}，你确定要销毁所有数据吗？\n\n"
-                f"这将永久删除以下内容：\n"
-                f"• 所有笔记和记录\n"
-                f"• 待办事项\n"
-                f"• 长期记忆\n"
-                f"• 情绪日记和打卡记录\n"
-                f"• 所有个人配置\n\n"
-                f"此操作不可逆❗\n\n"
-                f"如果确定，请在 5 分钟内回复「确认销毁」。\n"
-                f"回复其他任何内容将取消操作。"
+                "⚠️ 你确定要销毁所有数据吗？\n\n"
+                "这将永久删除：\n"
+                "- 你的所有笔记和待办\n"
+                "- 长期记忆和日报\n"
+                "- 用户配置和偏好\n\n"
+                "此操作**不可恢复**！\n\n"
+                "如果确定要继续，请回复「确认销毁」或「确认删除」。\n"
+                "5 分钟内有效，超时需重新申请。"
             ),
-            "state_updates": {
-                "pending_destroy": pending,
-            },
+            "state_updates": {"pending_destroy": state["pending_destroy"]}
         }
-    else:
-        # 确认销毁 — 检查是否超时
-        pending = state.get("pending_destroy", {})
-        if not pending.get("pending"):
-            return {
-                "success": False,
-                "reply": "没有待确认的销毁请求。如果你想销毁数据，请先说「销毁我的数据」。",
-            }
-
-        requested_at = pending.get("requested_at", 0)
-        if time.time() - requested_at > _DESTROY_CONFIRM_TIMEOUT:
-            return {
-                "success": False,
-                "reply": "确认已超时（超过 5 分钟），请重新发起销毁请求。",
-                "state_updates": {"pending_destroy": {}},
-            }
-
-        # 执行删除
-        _log(f"[DataManage] ⚠️ 用户 {ctx.user_id} 确认销毁数据!")
-
+    
+    # 第二次调用：检查确认状态
+    if not pending.get("pending"):
+        return {
+            "success": False,
+            "reply": "没有待处理的销毁请求。如需销毁数据，请先说「删除我的所有数据」。"
+        }
+    
+    # 检查是否超时（5 分钟）
+    requested_at = pending.get("requested_at", "")
+    if requested_at:
         try:
-            from user_context import delete_user
-            success = delete_user(ctx.user_id)
-            if success:
-                _log(f"[DataManage] 用户 {ctx.user_id} 数据已销毁")
-                return {
-                    "success": True,
-                    "reply": (
-                        f"再见{nickname}，你的所有数据已被彻底删除。\n\n"
-                        f"如果将来想回来，随时欢迎～ 🌟\n"
-                        f"（下次发消息会作为新用户重新开始）"
-                    ),
-                }
-            else:
+            req_time = datetime.strptime(requested_at, "%Y-%m-%d %H:%M:%S")
+            req_time = req_time.replace(tzinfo=BEIJING_TZ)
+            now = datetime.now(BEIJING_TZ)
+            if (now - req_time).total_seconds() > 300:
+                state["pending_destroy"] = {}
                 return {
                     "success": False,
-                    "reply": "数据删除过程中遇到了问题，请联系管理员处理。",
+                    "reply": "确认超时，请重新发起销毁请求。",
+                    "state_updates": {"pending_destroy": {}}
                 }
         except Exception as e:
-            _log(f"[DataManage] 销毁用户数据异常: {e}")
+            _log(f"[data.destroy] 时间解析失败: {e}")
+    
+    # 执行销毁
+    _log(f"[data.destroy] 开始销毁用户数据: {ctx.user_id}")
+    
+    try:
+        from user_context import delete_user
+        
+        # 记录到审计日志
+        _log(f"[data.destroy] 审计日志: user_id={ctx.user_id}, action=destroy, time={_now_str()}")
+        
+        # 执行删除
+        success = delete_user(ctx.user_id)
+        
+        if success:
+            _log(f"[data.destroy] 用户数据已销毁: {ctx.user_id}")
+            
+            # 清除状态
+            state.clear()
+            
+            return {
+                "success": True,
+                "reply": (
+                    "👋 你的所有数据已被销毁。\n\n"
+                    "感谢你使用 Karvis，希望我曾给你带来帮助。\n"
+                    "如果未来想要回来，随时欢迎~\n\n"
+                    "再见，保重！💙"
+                )
+            }
+        else:
             return {
                 "success": False,
-                "reply": "数据删除过程中遇到了问题，请联系管理员处理。",
+                "reply": "数据销毁过程中出现问题，请联系管理员处理。"
             }
+            
+    except Exception as e:
+        _log(f"[data.destroy] 销毁失败: {e}")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return {
+            "success": False,
+            "reply": f"数据销毁失败: {str(e)}，请联系管理员。"
+        }
 
 
-# ============ Skill 注册 ============
-
+# Skill 热加载注册表
 SKILL_REGISTRY = {
     "data.export": export_user_data,
     "data.destroy": destroy_user_data,

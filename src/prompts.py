@@ -43,7 +43,8 @@ SKILL_PROMPT_LINES = {
     "checkin.cancel": '**checkin.cancel** `{}` — 取消打卡',
     "checkin.start": '**checkin.start** `{}` — 启动打卡（定时器触发）',
     "todo.add": '**todo.add** `{content, due_date?, remind_at?, recur?, recur_spec?}` — 添加待办。due_date=YYYY-MM-DD截止日, remind_at=YYYY-MM-DD HH:MM（一次性，默认）或HH:MM（仅循环待办使用）, recur=daily/weekday/weekly/monthly（循环规则，仅用户明确说了“每天/每周/工作日/每月”时才填）, recur_spec={cycle_on,cycle_off,start_date}（周期循环）或{weekdays:[1,3,5]}（指定星期）。用户说"每天提醒我X点做Y"→recur="daily",remind_at="HH:MM"；"明天3点提醒"→remind_at="YYYY-MM-DD 15:00"（不填recur）。多个待办用steps分别todo.add。',
-    "todo.done": '**todo.done** `{keyword?, indices?}` — 完成待办。keyword=模糊匹配（如"猫粮"匹配"买猫粮"）；indices=序号完成，支持 "3"/"2-7"/"1,3,5"。有 indices 时优先用 indices。序号对应 todo.list 返回的编号。',
+    "todo.done": '**todo.done** `{keyword?, indices?}` — 标记待办完成（用于用户表达"我已经做了XX"的完成意图）。keyword=模糊匹配；indices=序号完成，支持 "3"/"2-7"/"1,3,5"。循环待办会标记为今天打卡。注意：过了提醒时间的一次性待办会自动标注完成。',
+    "todo.delete": '**todo.delete** `{keyword?, indices?}` — 删除待办（直接从列表移除，不标记完成）。keyword=模糊匹配；indices=序号删除，支持 "3"/"2-7"/"1,3,5"。用户说"删除XX待办/不要这个待办/去掉这个"时使用。',
     "todo.remind_cancel": '**todo.remind_cancel** `{id?, content?}` — 取消循环提醒（id精确匹配或content模糊匹配）',
     "todo.list": '**todo.list** `{}` — 查看待办（返回带序号的列表，用户后续可用序号引用）',
     "classify.archive": '**classify.archive** `{category, title, content, attachment?, merge?}` — 归档（category: work|emotion|fun|misc, title≤10字）。当用户紧接着上一条消息（尤其是图片/语音/视频）发送补充说明时，设 `merge: true`，内容会合并到最近一条同类归档中，而非新建条目。',
@@ -185,9 +186,21 @@ RULES_CORE = """# 决策规则
 - **判断标准**：如果用户描述了一个**将来要执行的动作**（而不是感想或闲聊），就应该 todo.add
 - 不确定时，优先 todo.add 而不是 classify.archive 或 ignore —— 宁可多加一个待办，不可漏掉任务
 - 用户一句话多个待办 → 用 steps 分别 todo.add 每一条
-- "做完了/搞定了" → todo.done（循环待办会标记为今天打卡，不会永久完成）
-  - 用户说具体内容（"猫粮搞定了"）→ keyword 匹配
-  - 用户用序号引用（"2-7完成了"、"第3个做完了"、"1和3做完了"）→ indices 参数
+
+### 删除待办 vs 标记完成（重要区分）
+- **删除待办** `todo.delete`：用户说"删除/删掉/去掉/不要这个待办/取消这个任务"等**移除意图**时使用
+  - 直接从待办列表移除，不标记为完成
+  - 例："把那个待办删了"、"不用提醒我了，删掉"、"去掉第3个"
+- **标记完成** `todo.done`：用户说"做完了/搞定了/我已经XX了"等**完成意图**时使用
+  - 循环待办：标记今天打卡
+  - 一次性待办：移到已完成区域
+  - 例："猫粮买好了"、"开会的事搞定了"、"第2个做完了"
+- **自动完成**：一次性提醒过了时间后，系统会自动标注为完成（无需用户操作）
+
+### 意图不明确时的处理
+- 如果用户的意图不够明确（如只说"那个待办"但不说是删除还是完成），应该向用户确认
+- 确认时给出选项："你是想删除这个待办，还是标记为已完成？"
+
 - "待办/有什么要做的" → todo.list
 - "取消XX提醒/不用提醒了/停掉提醒" → todo.remind_cancel（content填关键词模糊匹配）
   - 列表自带序号，用户后续可用序号引用
@@ -484,22 +497,30 @@ FLASH_QUICK_PROMPT = """你是 Karvis，用户的 AI 助手。快速判断意图
 ## 常用 Skill（根据意图选择）
 - **note.save** `{content}` — 记录笔记
 - **todo.add** `{content, remind_at?}` — 添加待办（remind_at 格式: "YYYY-MM-DD HH:MM" 或循环用 "HH:MM"）
-- **todo.done** `{keyword}` — 完成待办
+- **todo.done** `{keyword}` — 标记待办完成（用户说"做完了/我已经XX了"时）
+- **todo.delete** `{keyword}` — 删除待办（用户说"删除/删掉/去掉这个待办"时，直接移除不标记完成）
 - **todo.list** `{}` — 查看待办
 - **web.token** `{}` — 生成数据查看链接（用户说"我的记录"、"打开网页"、"看我的数据"、"查看链接"时触发）
 - **chat** `{}` — 闲聊/打招呼
+- **clarify** `{}` — 意图不明确，需要向用户确认
 - **ignore** `{}` — 无需处理
 
 ## 简单意图映射
 - 你好/早/晚安/嗨 → chat
 - 提醒我/待办/记得 → todo.add
-- 完成/做完了/搞定 → todo.done
+- 做完了/搞定了/我已经XX了 → todo.done（标记完成）
+- 删除/删掉/去掉XX待办 → todo.delete（直接移除）
 - 看看待办/有什么事 → todo.list
 - 我的记录/打开网页/看我的数据/查看链接/数据链接 → web.token
 - 其他有意义内容 → note.save
 
+## 意图确认（重要）
+当用户意图不够明确时，使用 clarify skill 向用户确认。例如：
+- 用户说"那个待办怎么处理"但没说是删除还是完成 → clarify，reply 询问"你是想删除这个待办，还是标记为已完成？"
+- 用户说的内容含糊不清 → clarify，reply 询问具体意图
+
 ## 输出（严格 JSON）
-{"skill":"xxx","params":{},"reply":"简短回复"}"""
+{"skill":"xxx","params":{},"reply":"简短回复"}""""""
 
 FLASH_NOTE_FILTER = """判断以下用户消息是否值得记录到"速记"（个人生活碎片时间线）。
 
