@@ -1,4 +1,4 @@
-# KarvisForYou — 多用户 AI 生活助手
+# TextagentForU — 多用户 AI 生活助手
 
 > 基于企业微信应用的 AI 生活助手，支持微信聊天置顶，支持多人共享一套部署，每人拥有独立的数据空间。
 > 记速记、管待办、写日记、追情绪、养习惯、记账理财——通过对话完成一切。
@@ -189,7 +189,7 @@ python3 app.py
 ## 项目结构
 
 ```
-KarvisForYou/
+TextagentForU/
 ├── setup.sh                 # 一键安装脚本
 ├── .env.example             # 配置模板
 ├── src/                     # 核心代码
