@@ -120,8 +120,8 @@ brain.process()
 ### 部署方式一：一键脚本
 
 ```bash
-git clone https://github.com/sameencai/KarvisForYou.git
-cd KarvisForYou
+git clone https://github.com/XinShu394/TextagentForU.git
+cd TextagentForU
 chmod +x setup.sh
 ./setup.sh
 ```
@@ -129,8 +129,8 @@ chmod +x setup.sh
 ### 部署方式二：Docker
 
 ```bash
-git clone https://github.com/sameencai/KarvisForYou.git
-cd KarvisForYou
+git clone https://github.com/XinShu394/TextagentForU.git
+cd TextagentForU
 cp .env.example src/.env
 nano src/.env          # 填入配置
 cd deploy
@@ -140,7 +140,7 @@ docker-compose up -d
 ### 部署方式三：手动
 
 ```bash
-cd KarvisForYou/src
+cd TextagentForU/src
 pip3 install -r requirements.txt
 cp ../.env.example .env
 nano .env              # 填入配置

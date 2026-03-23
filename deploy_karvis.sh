@@ -39,13 +39,13 @@ echo "📥 [4/7] 部署项目代码..."
 cd /root
 
 # 如果目录已存在，先备份
-if [ -d "KarvisForYou" ]; then
+if [ -d "TextagentForU" ]; then
     echo "  ⚠️ 检测到旧版本，备份中..."
-    mv KarvisForYou KarvisForYou_backup_$(date +%Y%m%d_%H%M%S)
+    mv TextagentForU TextagentForU_backup_$(date +%Y%m%d_%H%M%S)
 fi
 
-git clone https://github.com/sameencai/KarvisForYou.git
-cd KarvisForYou/src
+git clone https://github.com/XinShu394/TextagentForU.git
+cd TextagentForU/src
 
 # 安装 Python 依赖（使用清华镜像加速）
 pip3 install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -53,7 +53,7 @@ echo "  ✅ 项目代码已部署"
 
 # ============ 5. 写入 .env 配置 ============
 echo "⚙️ [5/7] 写入配置文件..."
-cat > /root/KarvisForYou/src/.env << 'ENVEOF'
+cat > /root/TextagentForU/src/.env << 'ENVEOF'
 # ============ Karvis 环境变量配置 ============
 # 全部通过阿里云百炼平台调用（一个 API Key 搞定）
 
@@ -159,8 +159,8 @@ Wants=nginx.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/KarvisForYou/src
-ExecStart=/usr/bin/python3 /root/KarvisForYou/src/app.py
+WorkingDirectory=/root/TextagentForU/src
+ExecStart=/usr/bin/python3 /root/TextagentForU/src/app.py
 Restart=always
 RestartSec=10
 StandardOutput=append:/root/karvis_stdout.txt

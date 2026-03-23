@@ -1,0 +1,1565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KarvisForYou — 多人共享的 AI 生活助手</title>
+  <meta name="description" content="基于企业微信的多用户 AI 生活助手。48 项技能、22 大模块，速记、待办、日记、情绪追踪、财务管理——通过对话管理你的生活。">
+  <meta property="og:title" content="KarvisForYou — 多人共享的 AI 生活助手">
+  <meta property="og:description" content="发条消息，AI 帮你搞定一切。多用户数据隔离，企业微信原生体验，48 项内置技能。">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+SC:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    /* ============ Reset & Base ============ */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #fafbfc;
+      --bg-white: #ffffff;
+      --bg-light: #f0f4f8;
+      --bg-hero: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      --bg-hero-dark: linear-gradient(135deg, #5a67d8 0%, #6b46a1 100%);
+      --text: #1a202c;
+      --text-secondary: #64748b;
+      --text-light: #94a3b8;
+      --text-white: #ffffff;
+      --accent: #667eea;
+      --accent-light: #818cf8;
+      --accent-dark: #4f46e5;
+      --accent-bg: rgba(102, 126, 234, 0.08);
+      --accent-bg-hover: rgba(102, 126, 234, 0.14);
+      --border: #e2e8f0;
+      --border-light: #f1f5f9;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+      --shadow-lg: 0 12px 40px rgba(0,0,0,0.12);
+      --shadow-xl: 0 20px 60px rgba(0,0,0,0.15);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 24px;
+      --max-w: 1100px;
+      --font: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+      --green: #10b981;
+      --orange: #f59e0b;
+      --rose: #f43f5e;
+      --cyan: #06b6d4;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
+    }
+
+    ::selection {
+      background: rgba(102, 126, 234, 0.2);
+      color: var(--text);
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ============ Nav ============ */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 0 40px;
+      height: 64px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      transition: all 0.3s;
+    }
+
+    nav.scrolled {
+      box-shadow: var(--shadow-sm);
+    }
+
+    .nav-logo {
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      background: var(--bg-hero);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .nav-links { display: flex; gap: 32px; align-items: center; }
+
+    .nav-links a {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      transition: color 0.2s;
+      font-weight: 500;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-cta {
+      font-size: 0.85rem !important;
+      color: var(--text-white) !important;
+      background: var(--bg-hero);
+      padding: 8px 22px;
+      border-radius: 8px;
+      font-weight: 600 !important;
+      transition: transform 0.2s, box-shadow 0.2s !important;
+      -webkit-text-fill-color: #fff;
+    }
+
+    .nav-cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
+    }
+
+    /* ============ Hero ============ */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 140px 24px 100px;
+      position: relative;
+      overflow: hidden;
+      background: var(--bg-hero);
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -20%;
+      right: -10%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -10%;
+      left: -10%;
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 20px;
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 100px;
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.9);
+      margin-bottom: 40px;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #4ade80;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.8rem, 7vw, 4.5rem);
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      color: #fff;
+      max-width: 700px;
+      margin-bottom: 24px;
+      text-shadow: 0 2px 20px rgba(0,0,0,0.1);
+    }
+
+    .hero p {
+      font-size: clamp(1.05rem, 2vw, 1.2rem);
+      color: rgba(255,255,255,0.85);
+      max-width: 560px;
+      line-height: 1.8;
+      margin-bottom: 48px;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn-hero-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 15px 36px;
+      background: #fff;
+      color: var(--accent-dark);
+      font-size: 0.95rem;
+      font-weight: 700;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn-hero-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+    }
+
+    .btn-hero-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 15px 36px;
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.3);
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .btn-hero-secondary:hover {
+      background: rgba(255,255,255,0.25);
+      border-color: rgba(255,255,255,0.5);
+    }
+
+    .hero-scroll-hint {
+      position: absolute;
+      bottom: 36px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: rgba(255,255,255,0.5);
+      font-size: 0.78rem;
+      animation: floatDown 2s ease-in-out infinite;
+    }
+
+    @keyframes floatDown {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(6px); }
+    }
+
+    /* ============ Section Common ============ */
+    section {
+      padding: 100px 24px;
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      margin-bottom: 16px;
+      font-weight: 700;
+      padding: 4px 14px;
+      background: var(--accent-bg);
+      border-radius: 100px;
+    }
+
+    .section-title {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    .section-desc {
+      font-size: 1.05rem;
+      color: var(--text-secondary);
+      line-height: 1.8;
+      max-width: 580px;
+    }
+
+    /* ============ Chat Demo ============ */
+    .demo-section {
+      padding: 0 24px 80px;
+      max-width: var(--max-w);
+      margin: -60px auto 0;
+      position: relative;
+      z-index: 10;
+    }
+
+    .chat-window {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      max-width: 560px;
+      margin: 0 auto;
+      box-shadow: var(--shadow-xl);
+    }
+
+    .chat-header {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg-light);
+    }
+
+    .chat-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: var(--bg-hero);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .chat-name {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .chat-status {
+      font-size: 0.76rem;
+      color: var(--green);
+      font-weight: 500;
+    }
+
+    .chat-body { padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+
+    .msg {
+      max-width: 85%;
+      padding: 12px 18px;
+      border-radius: 18px;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      animation: msgIn 0.5s ease-out both;
+    }
+
+    .msg-user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 6px;
+    }
+
+    .msg-ai {
+      align-self: flex-start;
+      background: var(--bg-light);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 6px;
+      color: var(--text);
+    }
+
+    .msg-ai .msg-label {
+      font-size: 0.72rem;
+      color: var(--accent);
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg:nth-child(1) { animation-delay: 0.3s; }
+    .msg:nth-child(2) { animation-delay: 0.8s; }
+    .msg:nth-child(3) { animation-delay: 1.3s; }
+    .msg:nth-child(4) { animation-delay: 1.8s; }
+    .msg:nth-child(5) { animation-delay: 2.3s; }
+
+    /* ============ Features ============ */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-top: 48px;
+    }
+
+    .feature-card {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px 28px;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--bg-hero);
+      transform: scaleX(0);
+      transition: transform 0.3s ease;
+      transform-origin: left;
+    }
+
+    .feature-card:hover {
+      border-color: var(--accent-light);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .feature-card:hover::before {
+      transform: scaleX(1);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      margin-bottom: 18px;
+    }
+
+    .feature-icon.purple { background: rgba(139, 92, 246, 0.1); }
+    .feature-icon.blue { background: rgba(59, 130, 246, 0.1); }
+    .feature-icon.green { background: rgba(16, 185, 129, 0.1); }
+    .feature-icon.orange { background: rgba(245, 158, 11, 0.1); }
+    .feature-icon.rose { background: rgba(244, 63, 94, 0.1); }
+    .feature-icon.cyan { background: rgba(6, 182, 212, 0.1); }
+
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    .feature-card p {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    .feature-tag {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 3px 10px;
+      background: var(--accent-bg);
+      color: var(--accent);
+      font-size: 0.72rem;
+      font-weight: 600;
+      border-radius: 100px;
+    }
+
+    /* ============ Modules Section ============ */
+    .modules-section {
+      background: var(--bg-light);
+      padding: 100px 24px;
+    }
+
+    .modules-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .modules-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-top: 48px;
+    }
+
+    .module-item {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      text-align: center;
+      transition: all 0.25s ease;
+    }
+
+    .module-item:hover {
+      border-color: var(--accent-light);
+      box-shadow: var(--shadow-sm);
+      transform: translateY(-1px);
+    }
+
+    .module-emoji {
+      font-size: 1.6rem;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .module-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .module-count {
+      font-size: 0.72rem;
+      color: var(--text-light);
+      font-weight: 500;
+    }
+
+    /* ============ How It Works ============ */
+    .steps {
+      margin-top: 56px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .step-card {
+      text-align: center;
+      padding: 40px 28px;
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      position: relative;
+      transition: all 0.3s ease;
+    }
+
+    .step-card:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateY(-3px);
+    }
+
+    .step-number {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: var(--bg-hero);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      font-weight: 800;
+      color: #fff;
+      margin: 0 auto 20px;
+    }
+
+    .step-card h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+
+    .step-card p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    .step-arrow {
+      position: absolute;
+      right: -16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-light);
+      font-size: 1.2rem;
+      z-index: 2;
+    }
+
+    /* ============ Numbers ============ */
+    .numbers-section {
+      background: var(--bg-hero);
+      padding: 80px 24px;
+    }
+
+    .numbers-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .numbers-inner .section-label {
+      color: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.15);
+    }
+
+    .numbers-inner .section-title {
+      color: #fff;
+    }
+
+    .numbers-inner .section-desc {
+      color: rgba(255,255,255,0.8);
+      margin: 0 auto 48px;
+    }
+
+    .numbers {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+
+    .number-card {
+      text-align: center;
+      padding: 36px 20px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: var(--radius-lg);
+      backdrop-filter: blur(10px);
+      transition: all 0.3s;
+    }
+
+    .number-card:hover {
+      background: rgba(255,255,255,0.15);
+      transform: translateY(-2px);
+    }
+
+    .number-value {
+      font-size: 2.6rem;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      color: #fff;
+    }
+
+    .number-label {
+      font-size: 0.88rem;
+      color: rgba(255,255,255,0.75);
+      margin-top: 6px;
+      font-weight: 500;
+    }
+
+    /* ============ Architecture ============ */
+    .arch-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-top: 48px;
+    }
+
+    .arch-card {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px 24px;
+      text-align: center;
+      transition: all 0.3s ease;
+    }
+
+    .arch-card:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .arch-icon {
+      font-size: 2rem;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .arch-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    .arch-card .arch-subtitle {
+      font-size: 0.82rem;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .arch-card p {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.65;
+    }
+
+    /* ============ Tech Stack ============ */
+    .tech-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 32px;
+    }
+
+    .tech-tag {
+      padding: 9px 20px;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      background: var(--bg-white);
+      transition: all 0.2s;
+      font-weight: 500;
+    }
+
+    .tech-tag:hover {
+      border-color: var(--accent-light);
+      color: var(--accent);
+      background: var(--accent-bg);
+    }
+
+    /* ============ QR Code Section ============ */
+    .qr-section {
+      background: var(--bg-light);
+      padding: 100px 24px;
+    }
+
+    .qr-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .qr-container {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      margin-top: 48px;
+      padding: 48px 64px;
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .qr-placeholder {
+      width: 220px;
+      height: 220px;
+      border: 3px dashed var(--border);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: var(--bg-light);
+      color: var(--text-light);
+      transition: all 0.3s;
+    }
+
+    .qr-placeholder:hover {
+      border-color: var(--accent-light);
+      color: var(--accent);
+    }
+
+    .qr-placeholder svg {
+      width: 48px;
+      height: 48px;
+      opacity: 0.5;
+    }
+
+    .qr-placeholder span {
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+
+    .qr-text {
+      font-size: 1.05rem;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .qr-desc {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      max-width: 360px;
+      line-height: 1.7;
+    }
+
+    .qr-steps {
+      display: flex;
+      gap: 32px;
+      margin-top: 32px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .qr-step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+    }
+
+    .qr-step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent-bg);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    /* ============ CTA ============ */
+    .cta-section {
+      text-align: center;
+      padding: 100px 24px 120px;
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(2rem, 5vw, 2.8rem);
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      margin-bottom: 16px;
+      background: var(--bg-hero);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .cta-section p {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      margin-bottom: 40px;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.8;
+    }
+
+    .cta-actions {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 15px 36px;
+      background: var(--bg-hero);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 700;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(102, 126, 234, 0.35);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 15px 36px;
+      background: var(--bg-white);
+      color: var(--text);
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--accent-light);
+      color: var(--accent);
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* ============ Web Pages ============ */
+    .web-section {
+      background: var(--bg-light);
+      padding: 100px 24px;
+    }
+
+    .web-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .web-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 14px;
+      margin-top: 48px;
+    }
+
+    .web-item {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px 16px;
+      text-align: center;
+      transition: all 0.25s ease;
+    }
+
+    .web-item:hover {
+      border-color: var(--accent-light);
+      box-shadow: var(--shadow-sm);
+      transform: translateY(-2px);
+    }
+
+    .web-icon {
+      font-size: 1.6rem;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .web-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    /* ============ Footer ============ */
+    footer {
+      background: var(--text);
+      padding: 48px 24px;
+      text-align: center;
+    }
+
+    footer p {
+      font-size: 0.82rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    footer a {
+      color: rgba(255,255,255,0.6);
+      transition: color 0.2s;
+    }
+
+    footer a:hover { color: rgba(255,255,255,0.9); }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 28px;
+      margin-bottom: 20px;
+    }
+
+    .footer-links a {
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+
+    .footer-divider {
+      width: 60px;
+      height: 2px;
+      background: rgba(255,255,255,0.1);
+      margin: 0 auto 20px;
+      border-radius: 1px;
+    }
+
+    /* ============ Responsive ============ */
+    @media (max-width: 900px) {
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .modules-grid { grid-template-columns: repeat(3, 1fr); }
+      .steps { grid-template-columns: 1fr; }
+      .step-arrow { display: none; }
+      .numbers { grid-template-columns: repeat(2, 1fr); }
+      .arch-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      nav { padding: 0 20px; }
+      .nav-links { gap: 16px; }
+      .nav-links .nav-link-text { display: none; }
+      .features-grid { grid-template-columns: 1fr; }
+      .modules-grid { grid-template-columns: repeat(2, 1fr); }
+      .numbers { grid-template-columns: 1fr; }
+      .hero { padding: 120px 20px 100px; }
+      section { padding: 80px 20px; }
+      .hero-actions { flex-direction: column; align-items: center; }
+      .btn-hero-primary, .btn-hero-secondary, .btn-primary, .btn-secondary {
+        width: 100%;
+        justify-content: center;
+      }
+      .qr-container { padding: 36px 28px; }
+      .qr-placeholder { width: 180px; height: 180px; }
+      .qr-steps { flex-direction: column; align-items: center; gap: 16px; }
+      .web-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ============ Scroll Reveal ============ */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.8s ease, transform 0.8s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .reveal-delay-1 { transition-delay: 0.1s; }
+    .reveal-delay-2 { transition-delay: 0.2s; }
+    .reveal-delay-3 { transition-delay: 0.3s; }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav id="navbar">
+  <div class="nav-logo">KarvisForYou</div>
+  <div class="nav-links">
+    <a href="#features" class="nav-link-text">功能</a>
+    <a href="#modules" class="nav-link-text">模块</a>
+    <a href="#how" class="nav-link-text">使用方式</a>
+    <a href="#join" class="nav-link-text">加入</a>
+    <a href="#join" class="nav-cta">立即体验</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="hero-badge-dot"></span>
+    多用户 · 企业微信原生 · 已备案上线
+  </div>
+  <h1>你的 AI 生活助手<br>开箱即用</h1>
+  <p>基于企业微信的多用户 AI 生活助手。48 项技能、22 大模块——速记、待办、日记、情绪追踪、财务管理，发条消息就能搞定一切。</p>
+  <div class="hero-actions">
+    <a href="#join" class="btn-hero-primary">扫码加入 →</a>
+    <a href="https://github.com/XinShu394/TextagentForU" target="_blank" class="btn-hero-secondary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      查看源码
+    </a>
+  </div>
+  <div class="hero-scroll-hint">
+    <span>向下滚动了解更多</span>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+  </div>
+</section>
+
+<!-- Chat Demo -->
+<div class="demo-section reveal">
+  <div class="chat-window">
+    <div class="chat-header">
+      <div class="chat-avatar">K</div>
+      <div>
+        <div class="chat-name">Karvis 助手</div>
+        <div class="chat-status">● 企业微信 · 在线</div>
+      </div>
+    </div>
+    <div class="chat-body">
+      <div class="msg msg-user">帮我记一下：下周三和客户开会讨论Q2方案</div>
+      <div class="msg msg-ai">
+        <div class="msg-label">Karvis</div>
+        已记录速记 ✅ 并创建待办：「下周三和客户开会讨论Q2方案」，到时候我会提醒你。
+      </div>
+      <div class="msg msg-user">今天心情不太好，项目延期了</div>
+      <div class="msg msg-ai">
+        <div class="msg-label">Karvis</div>
+        已记录你的心情 💙 项目延期确实让人焦虑，但这只是暂时的。我已帮你写入今天的情绪日记，晚些会生成情绪分析报告。
+      </div>
+      <div class="msg msg-user">备忘：护照下周二到期需要续办</div>
+    </div>
+  </div>
+</div>
+
+<!-- Features -->
+<section id="features" class="reveal">
+  <span class="section-label">核心功能</span>
+  <h2 class="section-title">不只是聊天机器人</h2>
+  <p class="section-desc">KarvisForYou 是你的第二大脑。每一条消息都会被理解、分类、结构化，变成你可回溯的人生记录。</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon purple">📝</div>
+      <h3>速记 & 备忘</h3>
+      <p>发消息自动记录。文字、语音、链接——想到什么说什么，AI 帮你整理归档、提取标签。支持快捷备忘指令。</p>
+      <span class="feature-tag">语音转文字</span>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon blue">✅</div>
+      <h3>待办管理</h3>
+      <p>「帮我记个待办」就够了。自动提取时间、创建提醒，支持查看、完成、删除。到点准时通知你。</p>
+      <span class="feature-tag">定时提醒</span>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon green">📖</div>
+      <h3>自动日报 / 周报 / 月报</h3>
+      <p>每天自动复盘你的记录，生成结构化日报。周报总结一周亮点，月报洞察长期趋势。支持自定义报告风格。</p>
+      <span class="feature-tag">AI 自动撰写</span>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon orange">😊</div>
+      <h3>情绪追踪</h3>
+      <p>AI 感知你的情绪起伏，每天生成情绪日记。30 天情绪曲线帮你了解自己，坏心情也值得被记录。</p>
+      <span class="feature-tag">可视化曲线</span>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon rose">💰</div>
+      <h3>财务管理</h3>
+      <p>支持微信/支付宝账单导入，智能分类。随时查询消费记录、生成月度财报和资产快照。</p>
+      <span class="feature-tag">账单导入</span>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon cyan">🔍</div>
+      <h3>深度分析</h3>
+      <p>对任何话题发起深入讨论。使用高级推理模型（DeepSeek R1）帮你剖析问题、追踪决策记录。</p>
+      <span class="feature-tag">R1 推理模型</span>
+    </div>
+  </div>
+</section>
+
+<!-- 22 Modules -->
+<div class="modules-section reveal" id="modules">
+  <div class="modules-inner">
+    <span class="section-label">22 大模块</span>
+    <h2 class="section-title">48 项技能全覆盖</h2>
+    <p class="section-desc">覆盖生活的方方面面，从日常记录到深度分析，从习惯养成到财务管理，一个助手全搞定。</p>
+
+    <div class="modules-grid">
+      <div class="module-item">
+        <span class="module-emoji">📝</span>
+        <div class="module-name">速记系统</div>
+        <div class="module-count">3 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">✅</span>
+        <div class="module-name">待办管理</div>
+        <div class="module-count">4 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">📋</span>
+        <div class="module-name">每日签到</div>
+        <div class="module-count">1 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">😊</span>
+        <div class="module-name">情绪追踪</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">📖</span>
+        <div class="module-name">日报生成</div>
+        <div class="module-count">1 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">📊</span>
+        <div class="module-name">周报 & 月报</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🎙️</span>
+        <div class="module-name">语音日记</div>
+        <div class="module-count">1 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">📌</span>
+        <div class="module-name">备忘录</div>
+        <div class="module-count">4 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🔍</span>
+        <div class="module-name">Deep Dive</div>
+        <div class="module-count">3 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🧭</span>
+        <div class="module-name">决策追踪</div>
+        <div class="module-count">3 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🎯</span>
+        <div class="module-name">习惯养成</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">📚</span>
+        <div class="module-name">归档系统</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">💰</span>
+        <div class="module-name">财务导入</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">💳</span>
+        <div class="module-name">财务查询</div>
+        <div class="module-count">3 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">📈</span>
+        <div class="module-name">财务报告</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🏦</span>
+        <div class="module-name">资产快照</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">⚙️</span>
+        <div class="module-name">个人设置</div>
+        <div class="module-count">3 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🎨</span>
+        <div class="module-name">报告风格</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">💾</span>
+        <div class="module-name">数据管理</div>
+        <div class="module-count">2 项技能</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🌐</span>
+        <div class="module-name">Web 面板</div>
+        <div class="module-count">14 个页面</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">⏰</span>
+        <div class="module-name">定时任务</div>
+        <div class="module-count">6 个调度</div>
+      </div>
+      <div class="module-item">
+        <span class="module-emoji">🤖</span>
+        <div class="module-name">智能路由</div>
+        <div class="module-count">三层模型</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- How It Works -->
+<section id="how" class="reveal">
+  <span class="section-label">使用方式</span>
+  <h2 class="section-title">无需安装 App，在企业微信里直接使用</h2>
+  <p class="section-desc">不需要下载任何应用，不需要学习新工具。在你熟悉的企业微信中，像和同事聊天一样开始。</p>
+
+  <div class="steps">
+    <div class="step-card">
+      <div class="step-number">1</div>
+      <h3>扫码加入企业</h3>
+      <p>使用微信扫描下方企业微信二维码，加入 Karvis 企业。一次扫码，永久使用。</p>
+      <div class="step-arrow">→</div>
+    </div>
+    <div class="step-card">
+      <div class="step-number">2</div>
+      <h3>找到 Karvis 应用</h3>
+      <p>在企业微信的工作台中找到 Karvis 应用，点击进入即可开始对话。像同事一样出现在你的聊天列表中。</p>
+      <div class="step-arrow">→</div>
+    </div>
+    <div class="step-card">
+      <div class="step-number">3</div>
+      <h3>发条消息就开始</h3>
+      <p>给 Karvis 发「你好」，它会引导你完成初始设置。之后你就拥有了一个 7×24 在线的 AI 生活助手。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Numbers -->
+<div class="numbers-section reveal">
+  <div class="numbers-inner">
+    <span class="section-label">一组数字</span>
+    <h2 class="section-title">为真实生活而造</h2>
+    <p class="section-desc">不是又一个 ChatGPT 套壳。KarvisForYou 专为「用对话管理生活」设计，每一个功能都经过真实场景验证。</p>
+
+    <div class="numbers">
+      <div class="number-card">
+        <div class="number-value">48</div>
+        <div class="number-label">个内置技能</div>
+      </div>
+      <div class="number-card">
+        <div class="number-value">22</div>
+        <div class="number-label">大功能模块</div>
+      </div>
+      <div class="number-card">
+        <div class="number-value">14</div>
+        <div class="number-label">个 Web 页面</div>
+      </div>
+      <div class="number-card">
+        <div class="number-value">100%</div>
+        <div class="number-label">数据隔离安全</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Architecture -->
+<section class="reveal">
+  <span class="section-label">三层智能架构</span>
+  <h2 class="section-title">三个 AI 大脑，各司其职</h2>
+  <p class="section-desc">不同任务匹配不同模型，兼顾速度、质量和成本。轻量请求秒回，深度分析精准。</p>
+
+  <div class="arch-grid">
+    <div class="arch-card">
+      <span class="arch-icon">⚡</span>
+      <h3>Flash 层</h3>
+      <div class="arch-subtitle">Qwen 系列</div>
+      <p>负责意图识别和快速分类。毫秒级响应，精准判断你的每条消息该交给谁处理。</p>
+    </div>
+    <div class="arch-card">
+      <span class="arch-icon">🧠</span>
+      <h3>Main 层</h3>
+      <div class="arch-subtitle">DeepSeek V3</div>
+      <p>核心对话引擎。处理日常对话、速记、待办、日记、报告等绝大部分任务，稳定可靠。</p>
+    </div>
+    <div class="arch-card">
+      <span class="arch-icon">🔬</span>
+      <h3>Think 层</h3>
+      <div class="arch-subtitle">DeepSeek R1</div>
+      <p>深度推理专家。在 Deep Dive 和决策分析中启用，提供高质量的深层思考和分析。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Web Pages -->
+<div class="web-section reveal">
+  <div class="web-inner">
+    <span class="section-label">数据可视化</span>
+    <h2 class="section-title">14 个 Web 页面，随时查看你的数据</h2>
+    <p class="section-desc">不只是在聊天中使用。通过 Web 面板，你可以随时回顾和管理所有记录数据。</p>
+
+    <div class="web-grid">
+      <div class="web-item">
+        <span class="web-icon">📊</span>
+        <div class="web-name">数据仪表盘</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">📝</span>
+        <div class="web-name">速记列表</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">✅</span>
+        <div class="web-name">待办事项</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">📖</span>
+        <div class="web-name">日记本</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">😊</span>
+        <div class="web-name">情绪曲线</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">🧠</span>
+        <div class="web-name">记忆档案</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">🎯</span>
+        <div class="web-name">习惯追踪</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">🧭</span>
+        <div class="web-name">决策记录</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">🔍</span>
+        <div class="web-name">深度回顾</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">⚙️</span>
+        <div class="web-name">个人设置</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">📋</span>
+        <div class="web-name">系统日志</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">👤</span>
+        <div class="web-name">登录页面</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">🗂️</span>
+        <div class="web-name">归档中心</div>
+      </div>
+      <div class="web-item">
+        <span class="web-icon">🛡️</span>
+        <div class="web-name">管理后台</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tech -->
+<section class="reveal">
+  <span class="section-label">技术栈</span>
+  <h2 class="section-title">简单可靠的架构</h2>
+  <p class="section-desc">没有复杂的中间件，没有外部数据库依赖。纯文件存储，每个用户独立数据目录，备份只需复制文件夹。</p>
+
+  <div class="tech-tags">
+    <span class="tech-tag">Python / Flask</span>
+    <span class="tech-tag">DeepSeek V3 / R1</span>
+    <span class="tech-tag">Qwen (Flash)</span>
+    <span class="tech-tag">企业微信 API</span>
+    <span class="tech-tag">APScheduler</span>
+    <span class="tech-tag">Docker</span>
+    <span class="tech-tag">Nginx</span>
+    <span class="tech-tag">Let's Encrypt</span>
+    <span class="tech-tag">纯文件存储</span>
+    <span class="tech-tag">多用户隔离</span>
+    <span class="tech-tag">消息加解密</span>
+    <span class="tech-tag">零数据库依赖</span>
+  </div>
+</section>
+
+<!-- QR Code Section -->
+<div class="qr-section reveal" id="join">
+  <div class="qr-inner">
+    <span class="section-label">🚀 立即体验</span>
+    <h2 class="section-title">扫码加入，即刻拥有你的 AI 生活助手</h2>
+    <p class="section-desc" style="margin: 0 auto;">已完成企业微信集成与 ICP 备案，扫码即可加入使用，无需自行部署。</p>
+
+    <div class="qr-container">
+      <div class="qr-placeholder">
+        <!-- 在此处替换为实际的企业微信二维码图片 -->
+        <!-- 例如: <img src="your-qr-code.png" alt="企业微信二维码" style="width:100%;height:100%;object-fit:contain;border-radius:12px;"> -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/>
+          <rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/>
+          <rect x="14" y="14" width="3" height="3"/>
+          <line x1="21" y1="14" x2="21" y2="14.01"/>
+          <line x1="21" y1="18" x2="21" y2="21"/>
+          <line x1="17" y1="18" x2="17" y2="18.01"/>
+          <line x1="14" y1="21" x2="17" y2="21"/>
+        </svg>
+        <span>企业微信二维码</span>
+      </div>
+      <div class="qr-text">微信扫码 · 加入 Karvis 企业</div>
+      <div class="qr-desc">扫码后将在企业微信中看到 Karvis 应用，直接发消息即可开始使用。数据完全隔离，仅你自己可见。</div>
+    </div>
+
+    <div class="qr-steps">
+      <div class="qr-step">
+        <span class="qr-step-num">1</span>
+        <span>微信扫描二维码</span>
+      </div>
+      <div class="qr-step">
+        <span class="qr-step-num">2</span>
+        <span>确认加入企业</span>
+      </div>
+      <div class="qr-step">
+        <span class="qr-step-num">3</span>
+        <span>打开企微找到 Karvis</span>
+      </div>
+      <div class="qr-step">
+        <span class="qr-step-num">4</span>
+        <span>发送「你好」开始</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CTA -->
+<div class="cta-section reveal">
+  <h2>开始记录你的生活</h2>
+  <p>你的数据完全隔离，只有你自己能看到。<br>一次加入，长期使用。每天只需发几条消息。</p>
+  <div class="cta-actions">
+    <a href="#join" class="btn-primary">
+      扫码加入 →
+    </a>
+    <a href="https://github.com/XinShu394/TextagentForU" target="_blank" class="btn-secondary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      查看源码
+    </a>
+  </div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/XinShu394/TextagentForU" target="_blank">GitHub</a>
+    <a href="#features">功能介绍</a>
+    <a href="#join">加入使用</a>
+  </div>
+  <div class="footer-divider"></div>
+  <p>© 2026 KarvisForYou — 多用户 AI 生活助手 · 基于 <a href="https://karvis.top" target="_blank" style="text-decoration: underline;">Karvis</a> 开源项目</p>
+</footer>
+
+<!-- Scripts -->
+<script>
+  // Scroll Reveal
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // Nav shadow on scroll
+  const navbar = document.getElementById('navbar');
+  window.addEventListener('scroll', () => {
+    if (window.scrollY > 10) {
+      navbar.classList.add('scrolled');
+    } else {
+      navbar.classList.remove('scrolled');
+    }
+  });
+
+  // Smooth scroll for anchor links
+  document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+    anchor.addEventListener('click', function (e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+</script>
+
+</body>
+</html>

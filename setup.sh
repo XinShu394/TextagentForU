@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 #  KarvisForYou 一键安装脚本
-#  用法: git clone ... && cd KarvisForYou && ./setup.sh
+#  用法: git clone ... && cd TextagentForU && ./setup.sh
 # ============================================================
 
 set -e
