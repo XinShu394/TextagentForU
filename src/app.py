@@ -531,6 +531,8 @@ _FEATURE_INTRO = (
     "📰 【日报】说「今日日报」，我帮你总结今天的记录\n"
     "🔄 【打卡】说「打卡」，开始每日复盘\n"
     "🌤️ 【天气】说「天气」，查看今日天气\n"
+    "📌 【随记】发「记 + 内容」，随时记录灵感想法，支持 #标签\n"
+    "🎨 【风格】说「日报简洁一点」等，定制报告输出风格\n"
     "⚙️ 【设置】说「叫我XX」改昵称 / 说「改性格」自定义 AI 风格\n"
     "📊 【数据】说「导出数据」查看你的所有记录\n\n"
     "💡 有任何问题，直接发消息给我就好~"
@@ -546,6 +548,8 @@ _FEATURE_INTRO_MARKDOWN = """**🤖 我是你的 AI 生活助手**
 > 📰 **日报** — 说「今日日报」总结今天记录
 > 🔄 **打卡** — 说「打卡」开始每日复盘
 > 🌤️ **天气** — 说「天气」查看今日天气
+> 📌 **随记** — 发「记 + 内容」记录灵感，支持 #标签
+> 🎨 **风格** — 说「日报简洁一点」定制报告风格
 > ⚙️ **设置** — 说「叫我XX」改昵称
 > 📊 **数据** — 说「导出数据」查看记录
 
@@ -770,7 +774,10 @@ def handle_message(msg, user_id):
                     f"好呀，以后我就叫「{ai_name}」啦～ 很高兴认识你{nickname}！\n\n"
                     f"来试试我的核心功能吧 👇\n"
                     f"随便发句话给我，比如：\n"
-                    f"「今天天气真好，心情不错」"
+                    f"「今天天气真好，心情不错」\n\n"
+                    f"💡 小贴士：\n"
+                    f"• 发「记 + 内容」随时记录灵感和想法\n"
+                    f"• 说「日报简洁一点」可以定制报告风格"
                 )
                 channel_router.send_message(user_id, reply)
                 return
@@ -1174,18 +1181,6 @@ def _run_system_action_for_user(action, data, uid, ctx):
             except Exception as e:
                 _log(f"[/system] [{uid}] 到期决策读取失败: {e}")
 
-            try:
-                from skills.habit_coach import check_experiment_expiry, get_experiment_summary_for_review
-                _state = read_state_cached(ctx) or {}
-                expiry_msg = check_experiment_expiry(_state)
-                if expiry_msg:
-                    context["experiment_expired"] = expiry_msg
-                exp_summary = get_experiment_summary_for_review(_state)
-                if exp_summary:
-                    context["active_experiment"] = exp_summary
-            except Exception as e:
-                _log(f"[/system] [{uid}] 实验上下文读取失败: {e}")
-
         if action in ("morning_report", "evening_checkin"):
             try:
                 context["nudge"] = _build_nudge_context(ctx)
@@ -1215,41 +1210,6 @@ def _run_system_action_for_user(action, data, uid, ctx):
             _log(f"[system_action] {action}: 发送回复给 {uid}, len={len(reply)}")
             channel_router.send_message(uid, reply)
         _log(f"[system_action] {action} 完成, user={uid}, has_reply={bool(reply)}, 耗时={time.time()-t0:.1f}s")
-        return {"ok": True, "has_reply": bool(reply)}
-
-    if action == "reflect_push":
-        from skills.reflect import push as reflect_push
-        state = read_state_cached(ctx) or {}
-        _log(f"[system_action] reflect_push: 推送深度自问, user={uid}")
-        result = reflect_push({}, state, ctx)
-        su = result.get("state_updates", {})
-        if su:
-            state.update(su)
-            write_state_and_update_cache(state, ctx)
-        reply = result.get("reply") if result else None
-        if reply:
-            channel_router.send_message(uid, reply)
-        _log(f"[system_action] reflect_push 完成, user={uid}, has_reply={bool(reply)}, 耗时={time.time()-t0:.1f}s")
-        return {"ok": True, "has_reply": bool(reply)}
-
-    if action == "mood_generate":
-        from skills.mood_diary import execute as mood_execute
-        state = read_state_cached(ctx) or {}
-
-        # 幂等保护：同一天只生成一次
-        today_str = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
-        scores = state.get("mood_scores", [])
-        if any(s.get("date") == today_str for s in scores):
-            _log(f"[system_action] mood_generate 今天({today_str})已生成，跳过, user={uid}")
-            return {"ok": True, "skipped": True}
-
-        _log(f"[system_action] mood_generate: 开始生成情绪日记, user={uid}")
-        result = mood_execute(data, state, ctx)
-        write_state_and_update_cache(state, ctx)
-        reply = result.get("reply") if result else None
-        if reply:
-            channel_router.send_message(uid, reply)
-        _log(f"[system_action] mood_generate 完成, user={uid}, has_reply={bool(reply)}, 耗时={time.time()-t0:.1f}s")
         return {"ok": True, "has_reply": bool(reply)}
 
     if action == "weekly_review":
@@ -1907,14 +1867,6 @@ def _generate_daily_intents(state):
             "status": "pending"
         },
         {
-            "type": "reflect_push",
-            "earliest": _add_minutes(sleep_time, -210),
-            "latest": _add_minutes(sleep_time, -120),
-            "ideal": _add_minutes(sleep_time, -180),
-            "priority": "normal",
-            "status": "pending"
-        },
-        {
             "type": "evening_checkin",
             "earliest": _add_minutes(sleep_time, -120),
             "latest": _add_minutes(sleep_time, -30),
@@ -2157,7 +2109,6 @@ def _rule_evaluate(intent, state, now):
 _MERGEABLE = {
     ("evening_checkin", "daily_report"),
     ("morning_report", "todo_remind"),
-    ("reflect_push", "evening_checkin"),
 }
 
 
@@ -2189,7 +2140,6 @@ def _execute_intent(intent, user_id=None):
         "todo_remind": "todo_remind",
         "companion": "companion_check",
         "nudge_check": "nudge_check",
-        "reflect_push": "reflect_push",
         "evening_checkin": "evening_checkin",
         "daily_report": "daily_report",
     }
@@ -2249,9 +2199,8 @@ def _setup_builtin_scheduler():
     jobs = [
         # 保留：不依赖用户节奏的固定任务
         ("refresh_cache",   {"trigger": "interval", "minutes": 30}),
-        ("mood_generate",   {"trigger": "cron", "hour": 22, "minute": 0}),
-        ("weekly_review",   {"trigger": "cron", "day_of_week": "sun", "hour": 21, "minute": 30}),
-        ("monthly_review",  {"trigger": "cron", "day": "last", "hour": 22, "minute": 0}),
+        ("weekly_review",   {"trigger": "cron", "day_of_week": "mon", "hour": 9, "minute": 0}),
+        ("monthly_review",  {"trigger": "cron", "day": 1, "hour": 9, "minute": 0}),
         ("finance_monthly_report", {"trigger": "cron", "day": 8, "hour": 20, "minute": 0}),
 
         # 待办提醒：每 1 分钟检查一次到期待办（独立于 scheduler_tick）

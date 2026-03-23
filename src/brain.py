@@ -286,7 +286,6 @@ def _select_model_tier(payload, is_system_action=False, action=None):
             "分析", "总结", "回顾", "深度", "报告", "建议", 
             "为什么", "怎么办", "如何", "帮我想", "帮我规划",
             "决策", "复盘", "归档", "整理", "搜索",
-            "读书笔记", "影视笔记", "微习惯", "实验",
         ]
         has_complex = any(kw in user_text for kw in complex_keywords)
         
@@ -540,17 +539,10 @@ def _select_rules(state, payload=None, ctx=None):
 
     user_text = (payload.get("text", "") if payload else "").lower() if payload else ""
 
-    # 读书/影视：仅关键词触发（去掉 state 持久字段避免每条消息都注入）
-    _BOOKS_KW = ("看了", "读了", "推荐", "这本书", "书摘", "金句", "总结一下",
-                 "在读", "在看", "电影", "剧", "纪录片", "动画", "影视")
-    if any(kw in user_text for kw in _BOOKS_KW):
-        segments.append(prompts.RULES_BOOKS_MEDIA)
-
-    # 习惯/Top3：仅关键词触发
-    _HABITS_KW = ("实验", "习惯", "top 3", "top3", "今天要做", "今天的目标",
-                  "今天最重要")
-    if any(kw in user_text for kw in _HABITS_KW):
-        segments.append(prompts.RULES_HABITS)
+    # Top 3 设定：关键词触发
+    _TOP3_KW = ("top 3", "top3", "今天要做", "今天的目标", "今天最重要")
+    if any(kw in user_text for kw in _TOP3_KW):
+        segments.append(prompts.RULES_TOP3)
 
     # 高级功能：语音 + 关键词触发（去掉 pending_decisions state 触发）
     _ADV_KW = ("要不要", "纠结", "犹豫", "决定了", "决策", "复盘",
@@ -639,35 +631,9 @@ def _build_state_summary(state):
 
     # 打卡状态
     if state.get("checkin_pending"):
-        step = state.get("checkin_step", 0)
-        questions = [
-            "今天做了什么？",
-            "今天状态打几分？(1-10)",
-            "什么事让你纠结？",
-            "脑子里最常冒出的念头是什么？"
-        ]
-        q = questions[step - 1] if 1 <= step <= 4 else "未知"
-        parts.append(f"打卡进行中: 第 {step}/4 题, 当前问题: \"{q}\"")
-        answers = state.get("checkin_answers", [])
-        if answers:
-            parts.append(f"已回答 {len(answers)} 题")
+        parts.append("打卡进行中: 等待用户回答「今天感觉怎么样？做了什么？」")
     else:
         parts.append("未在打卡")
-
-    # 深度自问状态
-    if state.get("reflect_pending"):
-        reflect_q = state.get("reflect_question", "")
-        reflect_cat = state.get("reflect_category", "")
-        parts.append(f"深度自问进行中: [{reflect_cat}] \"{reflect_q}\"")
-
-    # 活跃书籍/影视
-    active_book = state.get("active_book", "")
-    if active_book:
-        parts.append(f"正在读: 《{active_book}》")
-
-    active_media = state.get("active_media", "")
-    if active_media:
-        parts.append(f"正在看: 《{active_media}》")
 
     # V3-F12: 每日 Top 3
     daily_top3 = state.get("daily_top3", {})
@@ -684,18 +650,6 @@ def _build_state_summary(state):
             parts.append(f"今日 Top 3: {items_str}")
         else:
             parts.append(f"昨日({top3_date}) Top 3: {items_str}")
-
-    # V3-F11: 活跃实验
-    exp = state.get("active_experiment")
-    if exp and exp.get("status") == "active":
-        tracking = exp.get("tracking", {})
-        triggers_str = "、".join(exp.get("triggers", [])[:3]) if exp.get("triggers") else ""
-        parts.append(
-            f"活跃实验: 「{exp.get('name', '')}」"
-            f"(触发词: {triggers_str}, "
-            f"触发{tracking.get('trigger_count', 0)}次/"
-            f"接受{tracking.get('accepted_count', 0)}次)"
-        )
 
     # V3-F15: 待复盘决策
     pending_decisions = state.get("pending_decisions", [])
@@ -801,7 +755,7 @@ def process(payload, send_fn=None, ctx=None):
     if model_tier == "flash" and not is_system:
         # 检查是否在打卡/反思状态，如果是则强制用 Main
         if state.get("checkin_pending") or state.get("reflect_pending"):
-            _log("[Brain] 检测到打卡/反思状态，升级到 Main 模型")
+            _log("[Brain] 检测到打卡状态，升级到 Main 模型")
             model_tier = "main"
         else:
             # 使用精简 Prompt 快速处理
@@ -879,22 +833,8 @@ def process(payload, send_fn=None, ctx=None):
     #    Stage 2: Flash 后判 — 回复发出后异步调 Flash 判断是否值得写入
     primary_skill = _get_primary_skill(decision)
 
-    # Reflect 防护 — reflect_pending 时，非 reflect skill 强制重路由（优先级低于 checkin）
-    _REFLECT_SKILLS = ("reflect.answer", "reflect.skip", "reflect.history", "reflect.push")
-    _CHECKIN_SKILLS = ("checkin.answer", "checkin.skip", "checkin.cancel", "checkin.start")
-    if (state.get("reflect_pending")
-            and not state.get("checkin_pending")
-            and payload.get("type") != "system"
-            and primary_skill not in _REFLECT_SKILLS
-            and primary_skill not in _CHECKIN_SKILLS):
-        _log(f"[Brain] 深度自问防护: {primary_skill} → reflect.answer")
-        decision["skill"] = "reflect.answer"
-        decision["params"] = {"answer": user_text}
-        decision.pop("steps", None)
-        primary_skill = "reflect.answer"
-
     _pending_note_filter = False  # 是否需要 Flash 后判
-    if payload.get("type") != "system" and primary_skill not in ("checkin.answer", "checkin.skip", "checkin.cancel", "checkin.start", "reflect.answer", "reflect.skip"):
+    if payload.get("type") != "system" and primary_skill not in ("checkin.answer", "checkin.cancel", "checkin.start"):
         if primary_skill in _SKIP_NOTE_SKILLS:
             _log(f"[Brain][NoteFilter] 规则跳过: skill={primary_skill}")
         elif primary_skill == "note.save":
@@ -1170,28 +1110,25 @@ def _run_agent_loop(system_prompt, user_message, first_decision, first_context, 
 # ── V4: 不需要 Flash 加工的简单 skill ──
 _SIMPLE_SKILLS = frozenset({
     "note.save", "classify.archive", "todo.add", "todo.done", "todo.delete",
-    "checkin.start", "checkin.answer", "checkin.skip", "checkin.cancel",
-    "book.create", "book.excerpt", "book.thought", "book.summary", "book.quotes",
-    "media.create", "media.thought",
-    "mood.generate", "voice.journal",
+    "checkin.start", "checkin.answer", "checkin.cancel",
+    "voice.journal",
     "settings.nickname", "settings.ai_name", "settings.soul", "settings.info",
+    "settings.report_style",
     "web.token", "data.export", "data.destroy",
-    "habit.propose", "habit.nudge", "habit.status", "habit.complete",
     "decision.record", "dynamic",
-    "reflect.push", "reflect.answer", "reflect.skip", "reflect.history",
+    "memo.save",
 })
 
 # ── 速记智能过滤：规则预筛跳过集合（V-Web-01）──
 # 这些 skill 的消息已由对应 handler 结构化处理，无需重复写入 Quick-Notes
 _SKIP_NOTE_SKILLS = frozenset({
     "todo.add", "todo.done", "todo.delete", "todo.list",
-    "habit.propose", "habit.nudge", "habit.status", "habit.complete",
     "decision.record", "decision.review", "decision.list",
-    "book.create", "book.excerpt", "book.thought", "book.summary", "book.quotes",
-    "media.create", "media.thought",
     "web.token", "data.export", "data.destroy",
     "settings.nickname", "settings.ai_name", "settings.soul", "settings.info",
+    "settings.report_style",
     "deep.dive",
+    "memo.save", "memo.list", "memo.search",
 })
 
 
