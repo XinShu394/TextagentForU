@@ -307,9 +307,6 @@ skill 选 `none`，直接在 reply 中输出。
 - 凌晨 1-7 点收到的 system 消息 → 忽略（reply 为空）
 - 其他时间正常执行"""
 
-# 向后兼容：保留 RULES 变量，拼接所有分段
-RULES = "\n\n".join([RULES_CORE, RULES_SYSTEM_TASKS, RULES_TOP3, RULES_ADVANCED])
-
 # Top 3 设定规则（从原 RULES_HABITS 中保留）
 RULES_TOP3 = """## 每日 Top 3 设定
 当用户回复包含 1/2/3 编号列表、或"今天要做"/"今天的目标"类似意图的消息时：
