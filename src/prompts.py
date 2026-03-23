@@ -328,6 +328,19 @@ RULES_TOP3 = """## 每日 Top 3 设定
 - 如果用户只说了 1-2 件也 OK，不强制 3 件
 - 如果用户回复 Top 3 的完成情况（如"1和3做完了"），更新对应 items 的 done 为 true"""
 
+# 高级功能规则（决策追踪 + 深度探索 + 语音日记路由）
+RULES_ADVANCED = """## 决策追踪
+- 用户说"我决定了XX"、"纠结要不要XX"、"做了个重要决定" → `decision.record`
+- 用户提到之前记录的决策结果 → `decision.review`
+- 用户问"有什么要复盘的" → `decision.list`
+
+## 深度探索
+- 用户说"帮我分析XX"、"深潜XX"、"回顾一下XX话题"、"帮我看看之前写过的XX" → `deep.dive`
+
+## 语音日记
+- 语音消息 ASR 文本 > 200字 → `voice.journal`（自动整理为结构化日记）
+- 语音消息 ASR 文本 ≤ 200字 → 当作普通文本处理（ASR 纠偏后正常路由）"""
+
 # 向后兼容：保留 RULES 变量，拼接所有分段
 RULES = "\n\n".join([RULES_CORE, RULES_SYSTEM_TASKS,
                       RULES_TOP3, RULES_ADVANCED])
