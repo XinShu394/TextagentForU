@@ -650,8 +650,8 @@ def handle_message(msg, user_id):
 
         if event == 'CLICK':
             if event_key == 'MENU_FEATURES':
-                # 「查看功能」按钮 → 发送 Markdown 格式功能介绍
-                channel_router.send_message(user_id, _FEATURE_INTRO_MARKDOWN, msg_type="markdown")
+                # 「查看功能」按钮 → 发送纯文本功能介绍（兼容微信端）
+                channel_router.send_message(user_id, _FEATURE_INTRO)
                 return
             elif event_key == 'MENU_WEB_LINK':
                 # 「数据总览」按钮 → 转为"给我查看链接"，复用 web.token skill
@@ -681,13 +681,13 @@ def handle_message(msg, user_id):
         # 新用户欢迎消息
         if is_new:
             _log(f"[handle_message] 新用户 {user_id}，发送欢迎消息")
-            welcome_md = """**嗨～我是你的 AI 生活助手** 🤖
-
-住在企业微信里，随时为你服务。
-
-先认识一下吧，你希望我怎么称呼你？
-<font color="info">（直接说「叫我XX」就好~）</font>"""
-            channel_router.send_message(user_id, welcome_md, msg_type="markdown")
+            welcome_text = (
+                "嗨～我是你的 AI 生活助手 🤖\n\n"
+                "住在企业微信里，随时为你服务。\n\n"
+                "先认识一下吧，你希望我怎么称呼你？\n"
+                "（直接说「叫我XX」就好~）"
+            )
+            channel_router.send_message(user_id, welcome_text)
             # 通知管理员有新用户注册
             from config import ADMIN_USER_ID
             if ADMIN_USER_ID and user_id != ADMIN_USER_ID:
