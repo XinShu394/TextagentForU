@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Karvis 定时调度器（Event 函数）
-通过定时触发器调用 Karvis Web 函数的 /system 端点。
+TextAgent 定时调度器（Event 函数）
+通过定时触发器调用 TextAgent Web 函数的 /system 端点。
 
 部署为腾讯云 SCF Event 函数：
   入口函数：index.main_handler
@@ -24,8 +24,8 @@ import os
 import json
 import requests
 
-# Karvis Web 函数的公网 URL（通过环境变量配置）
-KARVIS_SYSTEM_URL = os.environ.get("KARVIS_SYSTEM_URL", "http://127.0.0.1:9000/system")
+# TextAgent Web 函数的公网 URL（通过环境变量配置）
+TEXTAGENT_SYSTEM_URL = os.environ.get("TEXTAGENT_SYSTEM_URL", "http://127.0.0.1:9000/system")
 
 
 def main_handler(event, context):
@@ -44,10 +44,10 @@ def main_handler(event, context):
         print("[Scheduler] 无 action，跳过")
         return {"ok": False, "error": "no action in Message"}
 
-    # 调用 Karvis /system 端点
+    # 调用 TextAgent /system 端点
     try:
         resp = requests.post(
-            KARVIS_SYSTEM_URL,
+            TEXTAGENT_SYSTEM_URL,
             json=payload,
             headers={"Content-Type": "application/json"},
             timeout=120

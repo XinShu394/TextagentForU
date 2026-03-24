@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-#  KarvisForYou 一键安装脚本
+#  TextAgentForU 一键安装脚本
 #  用法: git clone ... && cd TextagentForU && ./setup.sh
 # ============================================================
 
@@ -16,7 +16,7 @@ NC='\033[0m'
 
 echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}${BOLD}║      KarvisForYou 安装向导 (多用户版)         ║${NC}"
+echo -e "${CYAN}${BOLD}║      TextAgentForU 安装向导 (多用户版)         ║${NC}"
 echo -e "${CYAN}${BOLD}║   你的 AI 生活助手，住在企业微信里            ║${NC}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
@@ -148,9 +148,9 @@ else
     read -p "  你的企微用户 ID (定时推送目标，可回车跳过): " USER_ID
     USER_ID=${USER_ID:-"YourWeWorkUserID"}
 
-    # 管理员令牌（KarvisForAll 多用户版新增）
+    # 管理员令牌（TextAgentForU 多用户版新增）
     echo ""
-    echo -e "${BOLD}── 管理员配置 (KarvisForAll) ──${NC}"
+    echo -e "${BOLD}── 管理员配置 (TextAgentForU) ──${NC}"
     echo -e "  ${CYAN}管理员令牌用于访问 Web 管理页面，查看用户列表和 LLM 用量。${NC}"
     ADMIN_TOKEN=$(python3 -c "import uuid; print(uuid.uuid4().hex[:24])" 2>/dev/null || echo "change-me-$(date +%s)")
     echo -e "  ${GREEN}✓ 已自动生成管理员令牌: ${BOLD}${ADMIN_TOKEN}${NC}"
@@ -173,7 +173,7 @@ else
 
     # 写入 .env
     cat > "$ENV_FILE" << ENVEOF
-# Karvis 环境变量配置（由 setup.sh 自动生成）
+# TextAgent 环境变量配置（由 setup.sh 自动生成）
 
 # --- DeepSeek API ---
 # 推荐使用腾讯云 lkeap（国内网络稳定）
@@ -208,7 +208,7 @@ OBSIDIAN_BASE=/应用/remotely-save/EmptyVault
 DEFAULT_USER_ID=${USER_ID}
 PROCESS_ENDPOINT_URL=http://127.0.0.1:9000/process
 
-# --- 多用户管理 (KarvisForAll) ---
+# --- 多用户管理 (TextAgentForU) ---
 ADMIN_TOKEN=${ADMIN_TOKEN}
 DAILY_MESSAGE_LIMIT=${DAILY_MSG_LIMIT}
 WEB_TOKEN_EXPIRE_HOURS=24
@@ -279,7 +279,7 @@ if [ -n "$PUBLIC_IP" ]; then
     echo ""
     echo -e "  ${YELLOW}${BOLD}⚠ 请确认已在企微后台配置企业可信 IP:${NC}"
     echo -e "  ${YELLOW}  应用详情 → 企业可信IP → 填入: ${BOLD}${PUBLIC_IP}${NC}"
-    echo -e "  ${YELLOW}  （不配会导致 Karvis 无法发送消息）${NC}"
+    echo -e "  ${YELLOW}  （不配会导致 TextAgent 无法发送消息）${NC}"
 else
     echo -e "  ${YELLOW}无法获取公网 IP，请手动运行 curl ifconfig.me 并配置到企微后台${NC}"
 fi
@@ -291,27 +291,27 @@ echo -e "${GREEN}${BOLD}╚═════════════════�
 echo ""
 
 # 询问是否立即启动
-read -p "是否立即启动 Karvis? (y/N): " START_NOW
+read -p "是否立即启动 TextAgent? (y/N): " START_NOW
 if [[ "$START_NOW" == "y" || "$START_NOW" == "Y" ]]; then
     echo ""
 
-    # 启动 Karvis
-    echo -e "${GREEN}启动 Karvis...${NC}"
+    # 启动 TextAgent
+    echo -e "${GREEN}启动 TextAgent...${NC}"
     # 如果有虚拟环境，确保已激活
     if [ -f "$PROJECT_ROOT/venv/bin/activate" ]; then
         source "$PROJECT_ROOT/venv/bin/activate"
         PYTHON_CMD="python3"
     fi
     $PYTHON_CMD app.py &
-    KARVIS_PID=$!
+    TEXTAGENT_PID=$!
     sleep 2
 
-    # 检查 Karvis 是否启动成功
-    if ! kill -0 $KARVIS_PID 2>/dev/null; then
-        echo -e "${RED}Karvis 启动失败，请检查日志${NC}"
+    # 检查 TextAgent 是否启动成功
+    if ! kill -0 $TEXTAGENT_PID 2>/dev/null; then
+        echo -e "${RED}TextAgent 启动失败，请检查日志${NC}"
         exit 1
     fi
-    echo -e "  ${GREEN}✓ Karvis 已启动 (PID: $KARVIS_PID)${NC}"
+    echo -e "  ${GREEN}✓ TextAgent 已启动 (PID: $TEXTAGENT_PID)${NC}"
 
     # 启动内网穿透
     if [ "$TUNNEL_CMD" == "cloudflared" ]; then
@@ -319,7 +319,7 @@ if [[ "$START_NOW" == "y" || "$START_NOW" == "Y" ]]; then
         echo -e "${GREEN}启动内网穿透 (cloudflared)...${NC}"
         echo -e "${CYAN}等待生成公网 URL...${NC}"
         echo ""
-        TUNNEL_LOG=$(mktemp /tmp/karvis_tunnel_XXXXXX.log)
+        TUNNEL_LOG=$(mktemp /tmp/textagent_tunnel_XXXXXX.log)
         cloudflared tunnel --url http://localhost:9000 > "$TUNNEL_LOG" 2>&1 &
         TUNNEL_PID=$!
         
@@ -349,13 +349,13 @@ if [[ "$START_NOW" == "y" || "$START_NOW" == "Y" ]]; then
             echo -e "  ${GREEN}✓ 已自动更新 .env: WEB_DOMAIN=${TUNNEL_DOMAIN}${NC}"
             echo ""
 
-            # 重启 Karvis 使新配置生效
-            kill $KARVIS_PID 2>/dev/null
+            # 重启 TextAgent 使新配置生效
+            kill $TEXTAGENT_PID 2>/dev/null
             sleep 1
             $PYTHON_CMD app.py &
-            KARVIS_PID=$!
+            TEXTAGENT_PID=$!
             sleep 2
-            echo -e "  ${GREEN}✓ Karvis 已重启（加载新配置）${NC}"
+            echo -e "  ${GREEN}✓ TextAgent 已重启（加载新配置）${NC}"
 
             echo ""
             echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -378,8 +378,8 @@ if [[ "$START_NOW" == "y" || "$START_NOW" == "Y" ]]; then
         echo ""
         echo -e "  按 Ctrl+C 停止所有服务"
 
-        trap "kill $KARVIS_PID $TUNNEL_PID 2>/dev/null; rm -f '$TUNNEL_LOG'; exit 0" INT TERM
-        wait $KARVIS_PID
+        trap "kill $TEXTAGENT_PID $TUNNEL_PID 2>/dev/null; rm -f '$TUNNEL_LOG'; exit 0" INT TERM
+        wait $TEXTAGENT_PID
 
     elif [ "$TUNNEL_CMD" == "ngrok" ]; then
         echo ""
@@ -388,12 +388,12 @@ if [[ "$START_NOW" == "y" || "$START_NOW" == "Y" ]]; then
         echo ""
         ngrok http 9000 &
         TUNNEL_PID=$!
-        trap "kill $KARVIS_PID $TUNNEL_PID 2>/dev/null; exit 0" INT TERM
-        wait $KARVIS_PID
+        trap "kill $TEXTAGENT_PID $TUNNEL_PID 2>/dev/null; exit 0" INT TERM
+        wait $TEXTAGENT_PID
     else
         echo ""
-        echo -e "${YELLOW}没有内网穿透工具，Karvis 仅在本地可用 (http://localhost:9000)${NC}"
+        echo -e "${YELLOW}没有内网穿透工具，TextAgent 仅在本地可用 (http://localhost:9000)${NC}"
         echo -e "${YELLOW}请手动安装 cloudflared 后运行: cloudflared tunnel --url http://localhost:9000${NC}"
-        wait $KARVIS_PID
+        wait $TEXTAGENT_PID
     fi
 fi

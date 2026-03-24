@@ -1,9 +1,9 @@
 ---
-tags: [karvisforall, issues]
+tags: [textagentforall, issues]
 updated: 2026-02-19
 ---
 
-# KarvisForAll — 已知问题与迭代方向
+# TextAgentForU — 已知问题与迭代方向
 
 ## 已修复
 

@@ -36,7 +36,7 @@ def export_user_data(params, state, ctx):
         _log(f"[data.export] 开始导出用户数据: {ctx.user_id}")
         
         parts = []
-        parts.append("# 📦 Karvis 数据导出")
+        parts.append("# 📦 TextAgent 数据导出")
         parts.append(f"导出时间: {_now_str()}")
         parts.append(f"用户 ID: {ctx.user_id}")
         parts.append("")
@@ -45,7 +45,7 @@ def export_user_data(params, state, ctx):
         config = ctx.get_user_config()
         parts.append("## 👤 用户配置")
         parts.append(f"- 昵称: {config.get('nickname', '未设置')}")
-        parts.append(f"- AI 名字: {config.get('ai_name', 'Karvis')}")
+        parts.append(f"- AI 名字: {config.get('ai_name', 'TextAgent')}")
         parts.append(f"- 存储模式: {config.get('storage_mode', 'local')}")
         
         # 偏好设置
@@ -321,7 +321,7 @@ def destroy_user_data(params, state, ctx):
                 "success": True,
                 "reply": (
                     "👋 你的所有数据已被销毁。\n\n"
-                    "感谢你使用 Karvis，希望我曾给你带来帮助。\n"
+                    "感谢你使用 TextAgent，希望我曾给你带来帮助。\n"
                     "如果未来想要回来，随时欢迎~\n\n"
                     "再见，保重！💙"
                 )

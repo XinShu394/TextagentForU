@@ -1,2 +1,2 @@
 # -*- coding: utf-8 -*-
-"""Karvis Skills 包"""
+"""TextAgent Skills 包"""

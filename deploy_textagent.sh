@@ -1,12 +1,12 @@
 #!/bin/bash
 # ============================================================
-# Karvis 一键部署脚本
+# TextAgent 一键部署脚本
 # 域名: textagent.cn
 # 服务器 IP: <REDACTED_SERVER_IP>
 # ============================================================
 
 set -e
-echo "🚀 Karvis 部署开始..."
+echo "🚀 TextAgent 部署开始..."
 
 # ============ 1. 系统更新 + 基础依赖 ============
 echo "📦 [1/7] 安装系统依赖..."
@@ -54,7 +54,7 @@ echo "  ✅ 项目代码已部署"
 # ============ 5. 写入 .env 配置 ============
 echo "⚙️ [5/7] 写入配置文件..."
 cat > /root/TextagentForU/src/.env << 'ENVEOF'
-# ============ Karvis 环境变量配置 ============
+# ============ TextAgent 环境变量配置 ============
 # 全部通过阿里云百炼平台调用（一个 API Key 搞定）
 
 # --- DeepSeek API [通过阿里云百炼调用] ---
@@ -115,7 +115,7 @@ echo "🌐 [6/7] 配置 Nginx..."
 # 删除默认配置
 rm -f /etc/nginx/sites-enabled/default
 
-cat > /etc/nginx/sites-available/karvis << 'NGINXEOF'
+cat > /etc/nginx/sites-available/textagent << 'NGINXEOF'
 server {
     listen 80;
     server_name textagent.cn www.textagent.cn;
@@ -141,7 +141,7 @@ server {
 NGINXEOF
 
 # 启用配置
-ln -sf /etc/nginx/sites-available/karvis /etc/nginx/sites-enabled/karvis
+ln -sf /etc/nginx/sites-available/textagent /etc/nginx/sites-enabled/textagent
 
 # 测试 + 重启
 nginx -t && systemctl restart nginx && systemctl enable nginx
@@ -150,9 +150,9 @@ echo "  ✅ Nginx 已配置（textagent.cn → 127.0.0.1:9000）"
 # ============ 7. 配置 systemd 服务（开机自启） ============
 echo "🔧 [7/7] 配置 systemd 服务..."
 
-cat > /etc/systemd/system/karvis.service << 'SVCEOF'
+cat > /etc/systemd/system/textagent.service << 'SVCEOF'
 [Unit]
-Description=Karvis AI Assistant
+Description=TextAgent AI Assistant
 After=network.target nginx.service
 Wants=nginx.service
 
@@ -163,8 +163,8 @@ WorkingDirectory=/root/TextagentForU/src
 ExecStart=/usr/bin/python3 /root/TextagentForU/src/app.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/root/karvis_stdout.txt
-StandardError=append:/root/karvis_stderr.txt
+StandardOutput=append:/root/textagent_stdout.txt
+StandardError=append:/root/textagent_stderr.txt
 
 # 环境变量
 Environment=PYTHONUNBUFFERED=1
@@ -174,14 +174,14 @@ WantedBy=multi-user.target
 SVCEOF
 
 systemctl daemon-reload
-systemctl enable karvis
-systemctl start karvis
-echo "  ✅ Karvis 服务已启动"
+systemctl enable textagent
+systemctl start textagent
+echo "  ✅ TextAgent 服务已启动"
 
 # ============ 完成 ============
 echo ""
 echo "============================================"
-echo "🎉 Karvis 部署完成！"
+echo "🎉 TextAgent 部署完成！"
 echo "============================================"
 echo ""
 echo "📋 部署信息："
@@ -206,9 +206,9 @@ echo "  3️⃣  企业微信配置企业可信 IP："
 echo "     IP: <REDACTED_SERVER_IP>"
 echo ""
 echo "📋 常用命令："
-echo "  查看状态:   systemctl status karvis"
-echo "  查看日志:   tail -f /root/karvis_stdout.txt"
-echo "  重启服务:   systemctl restart karvis"
-echo "  停止服务:   systemctl stop karvis"
+echo "  查看状态:   systemctl status textagent"
+echo "  查看日志:   tail -f /root/textagent_stdout.txt"
+echo "  重启服务:   systemctl restart textagent"
+echo "  停止服务:   systemctl stop textagent"
 echo "  Nginx日志:  tail -f /var/log/nginx/error.log"
 echo ""

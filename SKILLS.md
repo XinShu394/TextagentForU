@@ -1,4 +1,4 @@
-# KarvisForYou 技能详解
+# TextAgentForU 技能详解
 
 共 **48 个 Skill 命令**，分布在 22 个功能模块中。
 

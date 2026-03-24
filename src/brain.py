@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Karvis 大脑
+TextAgent 大脑
 核心中枢：Prompt 组装 → 多模型路由 → JSON 解析 → Skill 分发 → 记忆更新
 """
 import json
@@ -75,7 +75,7 @@ def _send_admin_alert(alert_type, message):
 
     try:
         from channel_router import send_alert
-        results = send_alert(f"🚨 Karvis 告警\n\n{message}")
+        results = send_alert(f"🚨 TextAgent 告警\n\n{message}")
         if any(ok for _, ok in results):
             _alert_state["last_alert_time"][alert_type] = now
             _log(f"[Alert] 已推送: {alert_type}")
@@ -679,7 +679,7 @@ def _build_state_summary(state):
 
 def process(payload, send_fn=None, ctx=None):
     """
-    Karvis 大脑的核心入口（多用户版）。
+    TextAgent 大脑的核心入口（多用户版）。
 
     参数:
         payload: dict, 结构化消息
@@ -899,7 +899,7 @@ def process(payload, send_fn=None, ctx=None):
             _log(f"[Brain] 兜底回复: skill={primary_skill} → '{reply}'")
 
     if reply:
-        add_message_to_state(state, "karvis", reply)
+        add_message_to_state(state, "textagent", reply)
 
     # 10. 先发回复（O-001：用户感知延迟优化），再保存 state/memory
     if send_fn and reply:

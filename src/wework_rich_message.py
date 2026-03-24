@@ -166,7 +166,7 @@ def send_textcard(user_id: str, title: str, description: str,
 # ============ 模板卡片消息（按钮交互型） ============
 
 def send_button_card(user_id: str, main_title: str, sub_title: str,
-                     buttons: list, source: str = "Karvis") -> dict:
+                     buttons: list, source: str = "TextAgent") -> dict:
     """
     发送按钮交互型模板卡片
     
@@ -232,7 +232,7 @@ def send_button_card(user_id: str, main_title: str, sub_title: str,
 
 
 def send_vote_card(user_id: str, main_title: str, 
-                   options: list, source: str = "Karvis") -> dict:
+                   options: list, source: str = "TextAgent") -> dict:
     """
     发送投票选择型模板卡片（单选）
     
@@ -402,7 +402,7 @@ def send_action_card(user_id: str, title: str, content: str,
         "template_card": {
             "card_type": "text_notice",
             "source": {
-                "desc": "Karvis"
+                "desc": "TextAgent"
             },
             "main_title": {
                 "title": title

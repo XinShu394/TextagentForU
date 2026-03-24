@@ -6,6 +6,9 @@ src/.env
 data/
 src/data/
 *.log
+*_log.txt
+*_pid.txt
+*_stdout.txt
 nohup.out
 nohup.pid
 

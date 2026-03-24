@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-KarvisForAll V12 用户上下文管理
+TextAgentForU V12 用户上下文管理
 每个用户请求携带 UserContext，封装该用户的所有路径、IO 后端和配置。
 
 V12 改造要点：
@@ -28,7 +28,7 @@ def _log(msg):
 _project_root = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(_project_root, "data"))
 
-SYSTEM_DIR = os.path.join(DATA_DIR, "_karvis_system")
+SYSTEM_DIR = os.path.join(DATA_DIR, "_textagent_system")
 USER_REGISTRY_FILE = os.path.join(SYSTEM_DIR, "users.json")
 TOKENS_FILE = os.path.join(SYSTEM_DIR, "tokens.json")
 USAGE_LOG_FILE = os.path.join(SYSTEM_DIR, "usage_log.jsonl")
@@ -51,9 +51,9 @@ class UserContext:
 
         # ---- 本地基础目录（所有用户都有，用于存放 user_config 等系统文件） ----
         self.base_dir = os.path.join(DATA_DIR, "users", user_id)
-        _karvis_local = os.path.join(self.base_dir, "_Karvis")
-        self.user_config_file = os.path.join(_karvis_local, "user_config.json")
-        self.decision_log_file = os.path.join(_karvis_local, "logs", "decisions.jsonl")
+        _textagent_local = os.path.join(self.base_dir, "_TextAgent")
+        self.user_config_file = os.path.join(_textagent_local, "user_config.json")
+        self.decision_log_file = os.path.join(_textagent_local, "logs", "decisions.jsonl")
 
         # ---- 加载用户配置 ----
         self.config = self._load_config()
@@ -95,8 +95,8 @@ class UserContext:
         self.voice_journal_dir = os.path.join(_notes, "语音日记")
         self.memo_notes_dir = os.path.join(_notes, "随记")
 
-        # _Karvis 系统文件（memory 走 IO，config/log 始终本地）
-        self.memory_file = os.path.join(self.base_dir, "_Karvis", "memory", "memory.md")
+        # _TextAgent 系统文件（memory 走 IO，config/log 始终本地）
+        self.memory_file = os.path.join(self.base_dir, "_TextAgent", "memory", "memory.md")
 
         # 03-Finance（仅管理员可能使用，但路径先定义好）
         _finance = os.path.join(self.base_dir, "03-Finance")
@@ -133,8 +133,8 @@ class UserContext:
         self.fun_notes_dir = f"{base}/02-Notes/生活趣事"
         self.voice_journal_dir = f"{base}/02-Notes/语音日记"
 
-        # _Karvis 系统文件
-        self.memory_file = f"{base}/_Karvis/memory/memory.md"
+        # _TextAgent 系统文件
+        self.memory_file = f"{base}/_TextAgent/memory/memory.md"
 
         # 03-Finance
         self.finance_dir = f"{base}/03-Finance"
@@ -203,7 +203,7 @@ class UserContext:
         base = self.base_dir
         inbox = os.path.join(base, "00-Inbox")
         _notes = os.path.join(base, "02-Notes")
-        _karvis = os.path.join(base, "_Karvis")
+        _textagent = os.path.join(base, "_TextAgent")
         return [
             inbox,
             os.path.join(inbox, "attachments"),
@@ -215,8 +215,8 @@ class UserContext:
             os.path.join(_notes, "生活趣事"),
             os.path.join(_notes, "语音日记"),
             os.path.join(_notes, "随记"),
-            os.path.join(_karvis, "memory"),
-            os.path.join(_karvis, "logs"),
+            os.path.join(_textagent, "memory"),
+            os.path.join(_textagent, "logs"),
         ]
 
 
@@ -331,7 +331,7 @@ def _init_default_files(ctx: UserContext):
     if not os.path.exists(ctx.user_config_file):
         config_data = {
             "nickname": "",
-            "ai_name": "Karvis",
+            "ai_name": "TextAgent",
             "soul_override": "",
             "channel": "wework",
             "role": "user",

@@ -240,7 +240,7 @@ TextagentForU/
 
 ```
 data/
-├── _karvis_system/          # 系统数据
+├── _textagent_system/          # 系统数据
 │   ├── users.json           # 用户注册表
 │   ├── tokens.json          # Web 令牌
 │   └── usage_log.jsonl      # LLM 用量日志
@@ -250,7 +250,7 @@ data/
         ├── 01-Daily/        # 日报、周报、月报
         ├── 02-Notes/        # 分类笔记 + 随记
         │   └── 随记/        # memo.save 按日期存储
-        └── _Karvis/         # 记忆、配置、日志
+        └── _TextAgent/         # 记忆、配置、日志
 ```
 
 ---
@@ -272,7 +272,7 @@ data/
 
 ## 官网
 
-🔗 **https://karvis.top**
+🔗 **https://textagent.top**
 
 ---
 

@@ -1,6 +1,6 @@
-# Karvis 功能全景图 🎯
+# TextAgent 功能全景图 🎯
 
-> 本文档详细描述了 Karvis 的所有功能模块、触发方式和反馈形式。
+> 本文档详细描述了 TextAgent 的所有功能模块、触发方式和反馈形式。
 
 ---
 
@@ -697,7 +697,7 @@
 
 ```
 🔗 你的数据查看链接：
-https://karvis.app/view?token=xxx
+https://textagent.app/view?token=xxx
 
 链接 7 天内有效，请勿分享给他人~
 ```

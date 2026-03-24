@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Karvis 消息网关
+TextAgent 消息网关
 职责：接收企微消息 → 下载媒体/ASR → 构造 payload → 交给 brain.process()
 不做任何业务判断，所有逻辑由大脑决定。
 """
@@ -430,7 +430,7 @@ def _fetch_link_content(url):
 
 def build_payload(msg, ctx):
     """
-    将企微原始消息转换为 Karvis payload。
+    将企微原始消息转换为 TextAgent payload。
     处理媒体下载、附件上传、ASR，但不做任何业务判断。
     返回 payload dict。
     """
@@ -442,7 +442,7 @@ def build_payload(msg, ctx):
         content = msg.get('content', '')
         if content.startswith('/help') or content.startswith('帮助'):
             # 帮助命令直接在网关层处理
-            return None, 'Karvis 🤖\n\n发送任何内容，我会帮你记录到 Obsidian。\n支持：文字、图片、语音、视频、链接\n\n打卡相关：说"打卡"开始每日复盘'
+            return None, 'TextAgent 🤖\n\n发送任何内容，我会帮你记录到 Obsidian。\n支持：文字、图片、语音、视频、链接\n\n打卡相关：说"打卡"开始每日复盘'
         payload["type"] = "text"
         payload["text"] = content
         # F1: 检测纯 URL 文本，自动抓取网页正文
@@ -743,7 +743,7 @@ def handle_message(msg, user_id):
                 reply = (
                     f"好的{nickname}！以后就这么叫你啦～\n\n"
                     f"那你想给我起个什么名字呢？\n"
-                    f"（直接说名字就好，或者说「跳过」用默认名字 Karvis~）"
+                    f"（直接说名字就好，或者说「跳过」用默认名字 TextAgent~）"
                 )
                 channel_router.send_message(user_id, reply)
                 return
@@ -763,7 +763,7 @@ def handle_message(msg, user_id):
                 )
                 ai_name = (ai_name or "").strip().strip('"\'""''')
                 if not ai_name:
-                    ai_name = "Karvis"  # 无法识别时保持默认
+                    ai_name = "TextAgent"  # 无法识别时保持默认
 
                 config["ai_name"] = ai_name
                 config["onboarding_step"] = 3  # 进入等笔记阶段
@@ -1275,7 +1275,7 @@ def _run_system_action_for_user(action, data, uid, ctx):
 @app.route('/', methods=['GET'])
 def health():
     """健康检查（基础 — 用于负载均衡探活）"""
-    return "Karvis is alive"
+    return "TextAgent is alive"
 
 
 @app.route('/health', methods=['GET'])
@@ -1330,9 +1330,9 @@ def health_detail():
 
     # 6. 日志文件大小
     try:
-        from config import LOG_FILE_KARVISFORALL
-        if os.path.exists(LOG_FILE_KARVISFORALL):
-            log_size_mb = os.path.getsize(LOG_FILE_KARVISFORALL) / (1024 * 1024)
+        from config import LOG_FILE_TEXTAGENTFORU
+        if os.path.exists(LOG_FILE_TEXTAGENTFORU):
+            log_size_mb = os.path.getsize(LOG_FILE_TEXTAGENTFORU) / (1024 * 1024)
             checks["log_size_mb"] = round(log_size_mb, 1)
             if log_size_mb > 100:
                 checks["log_warning"] = "日志文件超过 100MB"
