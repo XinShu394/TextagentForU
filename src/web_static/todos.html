@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TextAgent · 待办</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.tailwindcss.com/3.4.1"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
 <script>
 tailwind.config = { theme: { extend: { colors: {
   warm: { 50:'#fdf8f6',100:'#f2e8e5',200:'#eaddd7',300:'#e0cfc7',400:'#d2bab0',500:'#bfa094',600:'#a18072',700:'#977669',800:'#846358',900:'#43302b' }
@@ -25,6 +25,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     </div>
   </div>
 
+  <!-- 统计概览 -->
+  <div class="px-4 pt-3" x-show="!loading && (pending.length || done.length)">
+    <div class="flex items-center gap-3 text-xs text-warm-500">
+      <span>待完成 <strong class="text-warm-700" x-text="pending.length"></strong></span>
+      <span>·</span>
+      <span>已完成 <strong class="text-warm-700" x-text="done.length"></strong></span>
+      <template x-if="pending.length + done.length > 0">
+        <span>· 完成率 <strong class="text-warm-700" x-text="Math.round(done.length / (pending.length + done.length) * 100) + '%'"></strong></span>
+      </template>
+    </div>
+  </div>
+
   <div class="p-4 space-y-2" x-show="!loading">
     <!-- 进行中 -->
     <template x-if="filter!=='done'">
@@ -33,18 +45,34 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
           进行中 (<span x-text="pending.length"></span>)
         </p>
         <template x-for="(item,i) in pending" :key="item.content + '_' + i">
-          <div class="bg-white rounded-xl p-3 shadow-sm flex items-center gap-2 mb-2 transition-all"
+          <div class="bg-white rounded-xl p-3 shadow-sm mb-2 transition-all"
                :class="item._done ? 'opacity-40 scale-95' : ''">
-            <button @click="completeTodo(i, item)"
-                    class="shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center active:scale-90 transition-all"
-                    :class="item._done ? 'border-green-400 bg-green-50' : 'border-warm-300 hover:border-warm-500'"
-                    :disabled="busy || item._done">
-              <span x-show="item._loading" class="text-xs animate-spin">⏳</span>
-              <span x-show="item._done && !item._loading" class="text-xs text-green-500">✓</span>
-              <span x-show="!item._loading && !item._done" class="text-xs text-transparent hover:text-warm-400">✓</span>
-            </button>
-            <p class="text-sm flex-1" :class="item._done ? 'text-warm-400 line-through' : 'text-warm-800'" x-text="item.content"></p>
-            <span x-show="item._checkin" class="text-xs text-green-600 whitespace-nowrap">今日已打卡 🔁</span>
+            <div class="flex items-center gap-2">
+              <button @click="completeTodo(i, item)"
+                      class="shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center active:scale-90 transition-all"
+                      :class="item._done ? 'border-green-400 bg-green-50' : 'border-warm-300 hover:border-warm-500'"
+                      :disabled="busy || item._done">
+                <span x-show="item._loading" class="text-xs animate-spin">⏳</span>
+                <span x-show="item._done && !item._loading" class="text-xs text-green-500">✓</span>
+                <span x-show="!item._loading && !item._done" class="text-xs text-transparent hover:text-warm-400">✓</span>
+              </button>
+              <p class="text-sm flex-1" :class="item._done ? 'text-warm-400 line-through' : 'text-warm-800'" x-text="item.content"></p>
+              <span x-show="item._checkin" class="text-xs text-green-600 whitespace-nowrap">今日已打卡 🔁</span>
+            </div>
+            <!-- 附加信息行：优先级 + 截止日期 + 重复 -->
+            <div class="flex items-center gap-2 ml-8 mt-1" x-show="item.priority || item.deadline || item.repeat">
+              <template x-if="item.priority">
+                <span class="text-xs px-1.5 py-0.5 rounded-full"
+                  :class="{'bg-red-50 text-red-600': item.priority === 'high', 'bg-yellow-50 text-yellow-600': item.priority === 'medium', 'bg-blue-50 text-blue-500': item.priority === 'low'}"
+                  x-text="{'high':'🔴 高','medium':'🟡 中','low':'🔵 低'}[item.priority] || item.priority"></span>
+              </template>
+              <template x-if="item.deadline">
+                <span class="text-xs text-warm-400" x-text="'⏰ ' + item.deadline"></span>
+              </template>
+              <template x-if="item.repeat">
+                <span class="text-xs text-warm-400">🔁 重复</span>
+              </template>
+            </div>
           </div>
         </template>
       </div>
@@ -56,9 +84,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
           已完成 (<span x-text="done.length"></span>)
         </p>
         <template x-for="(item,i) in done" :key="'d'+i">
-          <div class="bg-white rounded-xl p-3 shadow-sm flex items-start gap-2 opacity-60">
+          <div class="bg-white rounded-xl p-3 shadow-sm flex items-start gap-2 opacity-60 mb-2">
             <span class="text-green-500 mt-0.5">✅</span>
-            <p class="text-sm text-warm-600 flex-1 line-through" x-text="item.content"></p>
+            <div class="flex-1">
+              <p class="text-sm text-warm-600 line-through" x-text="item.content"></p>
+              <span x-show="item.completed_at" class="text-xs text-warm-400" x-text="item.completed_at"></span>
+            </div>
           </div>
         </template>
       </div>
@@ -71,8 +102,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     </div>
   </div>
 
-  <div x-show="loading" class="flex items-center justify-center h-64">
-    <p class="text-warm-400">加载中...</p>
+  <!-- 骨架屏 -->
+  <div x-show="loading" class="p-4 space-y-3 animate-pulse">
+    <div class="h-4 bg-warm-100 rounded w-36"></div>
+    <div class="bg-white rounded-xl p-3 shadow-sm flex items-center gap-2">
+      <div class="w-6 h-6 bg-warm-100 rounded-full"></div>
+      <div class="h-4 bg-warm-100 rounded flex-1"></div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow-sm flex items-center gap-2">
+      <div class="w-6 h-6 bg-warm-100 rounded-full"></div>
+      <div class="h-4 bg-warm-100 rounded flex-1"></div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow-sm flex items-center gap-2">
+      <div class="w-6 h-6 bg-warm-100 rounded-full"></div>
+      <div class="h-4 bg-warm-100 rounded w-3/4"></div>
+    </div>
   </div>
 
   <!-- Toast -->

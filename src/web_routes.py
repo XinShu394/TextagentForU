@@ -314,6 +314,9 @@ def api_todo_complete(user_id=None):
         "ok": result.get("success", False),
         "reply": result.get("reply", ""),
     })
+
+
+@api_bp.route("/daily", methods=["GET"])
 @require_auth
 def api_daily_list(user_id=None):
     """GET /api/daily — 获取日记/周报/月报列表"""
