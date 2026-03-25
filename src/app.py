@@ -1050,13 +1050,62 @@ def system_endpoint():
         # 待办提醒专用心跳：每 1 分钟检查所有用户的到期待办
         if action == "todo_remind_tick":
             from skills.todo_manage import check_todos
-            from memory import read_state_cached, write_state_and_update_cache
+            from memory import write_state_and_update_cache
             user_ids = [target_user] if target_user else get_all_active_users()
             total_sent = 0
+            now = datetime.now(BEIJING_TZ)
+            now_str = now.strftime("%H:%M")
+            today_str = now.strftime("%Y-%m-%d")
+            now_full = now.strftime("%Y-%m-%d %H:%M")
+            _log(f"[todo_remind_tick] 开始检查, 用户数: {len(user_ids)}, now={now_str}")
             for uid in user_ids:
                 try:
                     ctx, _ = get_or_create_user(uid)
-                    state = read_state_cached(ctx) or {}
+                    # 【修复】绕过缓存直接读文件，确保获取最新 state（含刚添加的待办）
+                    state = ctx.IO.read_json(ctx.state_file) or {}
+                    todos = state.get("todos", [])
+                    if not todos:
+                        continue  # 无待办的用户直接跳过
+
+                    # ── 智能预检：快速判断本轮是否有可能触发的待办 ──
+                    # 只扫描 state 中的字段（纯内存操作，不读文件），
+                    # 如果没有任何待办可能在本分钟触发，跳过 check_todos（省去 Todo.md IO）
+                    has_potential = False
+                    for t in todos:
+                        # 已推送过的循环待办跳过
+                        if t.get("recur") and t.get("last_notified") == today_str:
+                            continue
+                        # 循环待办：有 remind_at 的看时间是否到了，无 remind_at 且今天未推的直接标记
+                        if t.get("recur"):
+                            remind_at = t.get("remind_at", "")
+                            if remind_at and len(remind_at) <= 5:
+                                if now_str >= remind_at:
+                                    has_potential = True
+                                    break
+                            elif not t.get("last_notified") or t["last_notified"] != today_str:
+                                has_potential = True
+                                break
+                            continue
+                        # 一次性定时提醒：未推送且临近到期
+                        remind_at = t.get("remind_at", "")
+                        if remind_at and len(remind_at) > 5 and not t.get("last_notified"):
+                            # 粗筛：只有同天或 pre_notified 未做的才需要详查
+                            if remind_at[:10] == today_str or not t.get("pre_notified"):
+                                has_potential = True
+                                break
+                            continue
+                        # 截止日期提醒
+                        due_date = t.get("due_date", "")
+                        if due_date:
+                            if (due_date == today_str and t.get("last_notified") != today_str) or \
+                               (due_date < today_str and not t.get("overdue_notified")):
+                                has_potential = True
+                                break
+
+                    if not has_potential:
+                        continue  # 本轮无需检查，快速跳过
+
+                    _log(f"[todo_remind_tick] 检查用户 {uid}, 待办数: {len(todos)}")
                     result = check_todos(state, ctx=ctx, todo_file=ctx.todo_file)
                     messages = result.get("messages", [])
                     state_updates = result.get("state_updates", {})
@@ -1071,6 +1120,7 @@ def system_endpoint():
                         write_state_and_update_cache(state, ctx)
                 except Exception as e:
                     _log(f"[todo_remind_tick] 用户 {uid} 失败: {e}")
+            _log(f"[todo_remind_tick] 检查完成, 共推送 {total_sent} 条")
             return json.dumps({"ok": True, "action": "todo_remind_tick", "sent": total_sent})
 
         # V8: 智能调度引擎（daily_init / scheduler_tick 遍历所有用户）
@@ -1132,7 +1182,8 @@ def _run_system_action_for_user(action, data, uid, ctx):
 
     if action == "todo_remind":
         from skills.todo_manage import check_todos
-        state = read_state_cached(ctx) or {}
+        # 【修复】绕过缓存直接读文件，与 todo_remind_tick 保持一致
+        state = ctx.IO.read_json(ctx.state_file) or {}
         result = check_todos(state, ctx=ctx, todo_file=ctx.todo_file)
         messages = result.get("messages", [])
         state_updates = result.get("state_updates", {})
@@ -2108,7 +2159,7 @@ def _rule_evaluate(intent, state, now):
 
 _MERGEABLE = {
     ("evening_checkin", "daily_report"),
-    ("morning_report", "todo_remind"),
+    # todo_remind 已独立为 todo_remind_tick（1分钟心跳），不再走意图队列，移除合并规则
 }
 
 
@@ -2137,7 +2188,7 @@ def _execute_intent(intent, user_id=None):
 
     action_map = {
         "morning_report": "morning_report",
-        "todo_remind": "todo_remind",
+        # todo_remind 已独立为 todo_remind_tick，不再由意图队列驱动
         "companion": "companion_check",
         "nudge_check": "nudge_check",
         "evening_checkin": "evening_checkin",

@@ -788,6 +788,7 @@ def check_todos(state, ctx=None, todo_file=None):
                         messages.append(f"🔁 提醒：{content}")
                         t["last_notified"] = today_str
                         changed = True
+                        _log(f"[todo.check] 循环提醒触发: \"{content}\" remind_at={remind_at}")
                 except (ValueError, TypeError):
                     pass
             else:
@@ -800,21 +801,29 @@ def check_todos(state, ctx=None, todo_file=None):
         # ── 一次性定时提醒 ──
         if remind_at and len(remind_at) > 5:
             if t.get("last_notified"):
+                _log(f"[todo.check] 跳过(已推送): \"{content}\" last_notified={t['last_notified']}")
                 continue  # 已推送过
             try:
                 remind_time = datetime.strptime(remind_at, "%Y-%m-%d %H:%M")
                 remind_time = remind_time.replace(tzinfo=BEIJING_TZ)
                 diff_minutes = (remind_time - now).total_seconds() / 60
-                if diff_minutes <= 0:
+                _log(f"[todo.check] 一次性提醒: \"{content}\" remind_at={remind_at}, now={now.strftime('%Y-%m-%d %H:%M:%S')}, diff={diff_minutes:.1f}min, pre_notified={t.get('pre_notified', '')}")
+                if diff_minutes <= 2:
+                    # 【优化】容差 2 分钟：向后宽容，到期时间前 2 分钟到到期后均触发
+                    # 配合 last_notified 防重复，保证只推一次，即使心跳略有延迟也不错过
                     messages.append(f"⏰ 提醒：{content}")
                     t["last_notified"] = today_str
                     changed = True
+                    _log(f"[todo.check] → 触发正式提醒 ✓")
                 elif diff_minutes <= 30 and not t.get("pre_notified"):
                     messages.append(f"⏰ {int(diff_minutes)} 分钟后：{content}")
                     t["pre_notified"] = today_str
                     changed = True
-            except ValueError:
-                pass
+                    _log(f"[todo.check] → 触发预提醒 ({int(diff_minutes)}min)")
+                else:
+                    _log(f"[todo.check] → 未到期，跳过")
+            except ValueError as e:
+                _log(f"[todo.check] 解析 remind_at 失败: \"{content}\" remind_at={remind_at} error={e}")
             continue
 
         # ── 截止日期提醒 ──
