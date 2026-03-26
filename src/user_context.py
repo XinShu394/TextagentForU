@@ -8,6 +8,10 @@ V12 改造要点：
   2. OneDrive 用户使用远程路径体系，Local 用户使用本地路径体系
   3. 增加 Skill 过滤方法 (is_skill_allowed / get_allowed_skills)
   4. 增加 is_admin 属性
+
+V14 改造：
+  - Phase 1b: 所有注册表 / 令牌 / 邀请码 / 公告 / 反馈操作优先走 SQLite (db.py)
+  - 设置 TEXTAGENT_DB_DISABLE=1 可回退到 JSON 文件存储
 """
 import os
 import sys
@@ -15,6 +19,20 @@ import json
 import fnmatch
 import threading
 from datetime import datetime, timezone, timedelta
+
+# ---- Phase 1b: 引入 SQLite 层（可能为 None = 禁用）----
+try:
+    from db import (
+        users as _db_users,
+        tokens as _db_tokens,
+        invite_codes as _db_invite_codes,
+        announcements as _db_announcements,
+        feedbacks as _db_feedbacks,
+        audit_logs as _db_audit_logs,
+    )
+except ImportError:
+    _db_users = _db_tokens = _db_invite_codes = None
+    _db_announcements = _db_feedbacks = _db_audit_logs = None
 
 _BEIJING_TZ = timezone(timedelta(hours=8))
 
@@ -258,7 +276,24 @@ def get_or_create_user(user_id: str) -> tuple:
     """
     获取或创建用户。
     返回 (UserContext, is_new_user: bool)
+
+    V14: 优先走 SQLite，TEXTAGENT_DB_DISABLE=1 时回退 JSON 文件。
+    注：无论走哪条路径，目录创建和默认文件初始化始终在本地文件系统完成。
     """
+    # ── SQLite 路径 ──
+    if _db_users is not None:
+        user_data, is_new = _db_users.get_or_create_user(user_id)
+        ctx = UserContext(user_id)
+        if is_new:
+            _log(f"[UserContext] 新用户 {user_id}: 创建目录结构...")
+            for d in ctx.all_dirs():
+                os.makedirs(d, exist_ok=True)
+            _log(f"[UserContext] 新用户 {user_id}: 创建 {len(ctx.all_dirs())} 个目录完成")
+            _init_default_files(ctx)
+            _log(f"[UserContext] 新用户注册完成(SQLite): {user_id}, base_dir={ctx.base_dir}")
+        return ctx, is_new
+
+    # ── JSON 文件回退路径 ──
     with _registry_lock:
         registry = _read_registry()
         is_new = user_id not in registry.get("users", {})
@@ -266,17 +301,14 @@ def get_or_create_user(user_id: str) -> tuple:
         ctx = UserContext(user_id)
 
         if is_new:
-            # 创建目录结构
             _log(f"[UserContext] 新用户 {user_id}: 创建目录结构...")
             for d in ctx.all_dirs():
                 os.makedirs(d, exist_ok=True)
             _log(f"[UserContext] 新用户 {user_id}: 创建 {len(ctx.all_dirs())} 个目录完成")
 
-            # 创建默认文件
             _init_default_files(ctx)
             _log(f"[UserContext] 新用户 {user_id}: 默认文件初始化完成")
 
-            # 写入注册表
             if "users" not in registry:
                 registry["users"] = {}
             registry["users"][user_id] = {
@@ -291,11 +323,9 @@ def get_or_create_user(user_id: str) -> tuple:
             _write_registry(registry)
             _log(f"[UserContext] 新用户注册完成: {user_id}, base_dir={ctx.base_dir}")
         else:
-            # 更新活跃时间
             user_data = registry["users"][user_id]
             user_data["last_active"] = _now_str()
 
-            # 重置每日计数（如果跨天了）
             if user_data.get("message_count_date") != _today_str():
                 user_data["message_count_today"] = 0
                 user_data["message_count_date"] = _today_str()
@@ -357,6 +387,11 @@ def increment_message_count(user_id: str) -> tuple:
     增加用户今日消息计数。
     返回 (current_count, is_over_limit)
     """
+    # ── SQLite 路径 ──
+    if _db_users is not None:
+        return _db_users.increment_message_count(user_id)
+
+    # ── JSON 文件回退路径 ──
     with _registry_lock:
         registry = _read_registry()
         user_data = registry.get("users", {}).get(user_id)
@@ -382,6 +417,11 @@ def increment_message_count(user_id: str) -> tuple:
 
 def get_all_active_users() -> list:
     """获取所有活跃用户 ID（定时任务用）"""
+    # ── SQLite 路径 ──
+    if _db_users is not None:
+        return _db_users.get_all_active_users()
+
+    # ── JSON 文件回退路径 ──
     registry = _read_registry()
     active = []
     now = datetime.now(_BEIJING_TZ)
@@ -408,11 +448,16 @@ def get_all_active_users() -> list:
 
 def get_all_users() -> dict:
     """获取所有用户数据（管理员用）"""
+    if _db_users is not None:
+        return _db_users.get_all_users()
     return _read_registry().get("users", {})
 
 
 def update_user_status(user_id: str, status: str):
     """更新用户状态（active/suspended）"""
+    if _db_users is not None:
+        _db_users.update_user_status(user_id, status)
+        return
     with _registry_lock:
         registry = _read_registry()
         if user_id in registry.get("users", {}):
@@ -422,6 +467,9 @@ def update_user_status(user_id: str, status: str):
 
 def update_user_nickname(user_id: str, nickname: str):
     """更新注册表中的昵称"""
+    if _db_users is not None:
+        _db_users.update_user_nickname(user_id, nickname)
+        return
     with _registry_lock:
         registry = _read_registry()
         if user_id in registry.get("users", {}):
@@ -431,6 +479,8 @@ def update_user_nickname(user_id: str, nickname: str):
 
 def is_user_suspended(user_id: str) -> bool:
     """检查用户是否被挂起"""
+    if _db_users is not None:
+        return _db_users.is_user_suspended(user_id)
     registry = _read_registry()
     user_data = registry.get("users", {}).get(user_id, {})
     return user_data.get("status") == "suspended"
@@ -442,8 +492,8 @@ def delete_user(user_id: str) -> bool:
     
     删除范围：
     1. 用户数据目录 data/users/{user_id}/ （整个目录）
-    2. 注册表中的用户记录
-    3. 相关令牌
+    2. 注册表中的用户记录（SQLite 或 JSON）
+    3. 相关令牌（SQLite 级联删除 或 JSON 清理）
     
     返回: True=成功, False=失败
     """
@@ -453,7 +503,7 @@ def delete_user(user_id: str) -> bool:
 
     success = True
 
-    # 1. 删除用户数据目录
+    # 1. 删除用户数据目录（始终是文件系统操作）
     user_dir = os.path.join(DATA_DIR, "users", user_id)
     try:
         if os.path.exists(user_dir):
@@ -465,48 +515,65 @@ def delete_user(user_id: str) -> bool:
         _log(f"[UserContext] 删除用户目录失败: {e}")
         success = False
 
-    # 2. 从注册表中移除用户记录
-    with _registry_lock:
+    # 2 & 3. 从注册表移除 + 清理令牌
+    if _db_users is not None:
+        # ── SQLite 路径：级联删除用户 + 令牌 ──
         try:
-            registry = _read_registry()
-            if user_id in registry.get("users", {}):
-                del registry["users"][user_id]
-                _write_registry(registry)
-                _log(f"[UserContext] 已从注册表移除用户: {user_id}")
+            _db_users.delete_user(user_id)
+            _log(f"[UserContext] 已从 SQLite 删除用户: {user_id}")
         except Exception as e:
-            _log(f"[UserContext] 从注册表移除用户失败: {e}")
+            _log(f"[UserContext] SQLite 删除用户失败: {e}")
             success = False
+    else:
+        # ── JSON 文件回退路径 ──
+        with _registry_lock:
+            try:
+                registry = _read_registry()
+                if user_id in registry.get("users", {}):
+                    del registry["users"][user_id]
+                    _write_registry(registry)
+                    _log(f"[UserContext] 已从注册表移除用户: {user_id}")
+            except Exception as e:
+                _log(f"[UserContext] 从注册表移除用户失败: {e}")
+                success = False
 
-    # 3. 清理相关令牌
-    with _tokens_lock:
-        try:
-            data = _read_tokens()
-            tokens = data.get("tokens", {})
-            to_remove = [t for t, info in tokens.items() if info.get("user_id") == user_id]
-            for token in to_remove:
-                del tokens[token]
-            if to_remove:
-                _write_tokens(data)
-                _log(f"[UserContext] 已清理 {len(to_remove)} 个令牌: {user_id}")
-        except Exception as e:
-            _log(f"[UserContext] 清理令牌失败: {e}")
-            success = False
+        with _tokens_lock:
+            try:
+                data = _read_tokens()
+                tokens = data.get("tokens", {})
+                to_remove = [t for t, info in tokens.items() if info.get("user_id") == user_id]
+                for token in to_remove:
+                    del tokens[token]
+                if to_remove:
+                    _write_tokens(data)
+                    _log(f"[UserContext] 已清理 {len(to_remove)} 个令牌: {user_id}")
+            except Exception as e:
+                _log(f"[UserContext] 清理令牌失败: {e}")
+                success = False
 
     # 4. 记录审计日志
-    try:
-        audit_log = {
-            "action": "user_data_destroyed",
-            "user_id": user_id,
-            "timestamp": _now_str(),
-            "success": success,
-        }
-        audit_file = os.path.join(SYSTEM_DIR, "audit_log.jsonl")
-        os.makedirs(os.path.dirname(audit_file), exist_ok=True)
-        with open(audit_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(audit_log, ensure_ascii=False) + "\n")
-        _log(f"[UserContext] 审计日志已记录: {user_id}")
-    except Exception as e:
-        _log(f"[UserContext] 审计日志写入失败: {e}")
+    if _db_audit_logs is not None:
+        try:
+            _db_audit_logs.log_audit("user_data_destroyed", user_id=user_id,
+                                     success=success)
+            _log(f"[UserContext] 审计日志已记录(SQLite): {user_id}")
+        except Exception as e:
+            _log(f"[UserContext] SQLite 审计日志写入失败: {e}")
+    else:
+        try:
+            audit_log = {
+                "action": "user_data_destroyed",
+                "user_id": user_id,
+                "timestamp": _now_str(),
+                "success": success,
+            }
+            audit_file = os.path.join(SYSTEM_DIR, "audit_log.jsonl")
+            os.makedirs(os.path.dirname(audit_file), exist_ok=True)
+            with open(audit_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(audit_log, ensure_ascii=False) + "\n")
+            _log(f"[UserContext] 审计日志已记录: {user_id}")
+        except Exception as e:
+            _log(f"[UserContext] 审计日志写入失败: {e}")
 
     _log(f"[UserContext] 用户删除完成: {user_id}, success={success}")
     return success
@@ -548,6 +615,11 @@ def generate_token(user_id: str, expire_hours: int = 24) -> str:
     为用户生成 Web 访问令牌。
     返回 token 字符串。
     """
+    # ── SQLite 路径 ──
+    if _db_tokens is not None:
+        return _db_tokens.generate_token(user_id, expire_hours)
+
+    # ── JSON 文件回退路径 ──
     from config import WEB_TOKEN_EXPIRE_HOURS
     if expire_hours == 24:
         expire_hours = WEB_TOKEN_EXPIRE_HOURS
@@ -578,6 +650,11 @@ def verify_token(token: str) -> dict:
     if not token:
         return {"valid": False}
 
+    # ── SQLite 路径 ──
+    if _db_tokens is not None:
+        return _db_tokens.verify_token(token)
+
+    # ── JSON 文件回退路径 ──
     with _tokens_lock:
         data = _read_tokens()
         token_data = data.get("tokens", {}).get(token)
@@ -603,6 +680,11 @@ def verify_token(token: str) -> dict:
 
 def cleanup_expired_tokens():
     """清理过期令牌"""
+    # ── SQLite 路径 ──
+    if _db_tokens is not None:
+        return _db_tokens.cleanup_expired_tokens()
+
+    # ── JSON 文件回退路径 ──
     now = datetime.now(_BEIJING_TZ)
     removed = 0
 
@@ -661,6 +743,11 @@ def _write_invite_codes(codes: list):
 
 def create_invite_code(created_by: str = "admin") -> str:
     """生成一个 8 位邀请码"""
+    # ── SQLite 路径 ──
+    if _db_invite_codes is not None:
+        return _db_invite_codes.create_invite_code(created_by)
+
+    # ── JSON 文件回退路径 ──
     import random
     import string
     code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
@@ -681,11 +768,18 @@ def create_invite_code(created_by: str = "admin") -> str:
 
 def get_all_invite_codes() -> list:
     """获取所有邀请码"""
+    if _db_invite_codes is not None:
+        return _db_invite_codes.get_all_invite_codes()
     return _read_invite_codes()
 
 
 def use_invite_code(code: str, user_id: str) -> bool:
     """使用邀请码，成功返回 True"""
+    # ── SQLite 路径 ──
+    if _db_invite_codes is not None:
+        return _db_invite_codes.use_invite_code(code, user_id)
+
+    # ── JSON 文件回退路径 ──
     with _invite_lock:
         codes = _read_invite_codes()
         for c in codes:
@@ -701,6 +795,11 @@ def use_invite_code(code: str, user_id: str) -> bool:
 
 def delete_invite_code(code: str) -> bool:
     """删除邀请码"""
+    # ── SQLite 路径 ──
+    if _db_invite_codes is not None:
+        return _db_invite_codes.delete_invite_code(code)
+
+    # ── JSON 文件回退路径 ──
     with _invite_lock:
         codes = _read_invite_codes()
         new_codes = [c for c in codes if c["code"] != code]
@@ -737,6 +836,11 @@ def _write_announcements(announcements: list):
 
 
 def create_announcement(title: str, content: str) -> dict:
+    # ── SQLite 路径 ──
+    if _db_announcements is not None:
+        return _db_announcements.create_announcement(title, content)
+
+    # ── JSON 文件回退路径 ──
     ann = {
         "id": str(uuid.uuid4())[:8],
         "title": title,
@@ -751,10 +855,17 @@ def create_announcement(title: str, content: str) -> dict:
 
 
 def get_announcements() -> list:
+    if _db_announcements is not None:
+        return _db_announcements.get_announcements()
     return _read_announcements()
 
 
 def delete_announcement(ann_id: str) -> bool:
+    # ── SQLite 路径 ──
+    if _db_announcements is not None:
+        return _db_announcements.delete_announcement(ann_id)
+
+    # ── JSON 文件回退路径 ──
     with _announce_lock:
         anns = _read_announcements()
         new_anns = [a for a in anns if a["id"] != ann_id]
@@ -790,6 +901,11 @@ def _write_feedbacks(feedbacks: list):
 
 
 def create_feedback(user_id: str, content: str) -> dict:
+    # ── SQLite 路径 ──
+    if _db_feedbacks is not None:
+        return _db_feedbacks.create_feedback(user_id, content)
+
+    # ── JSON 文件回退路径 ──
     fb = {
         "id": str(uuid.uuid4())[:8],
         "user_id": user_id,
@@ -806,10 +922,17 @@ def create_feedback(user_id: str, content: str) -> dict:
 
 
 def get_feedbacks() -> list:
+    if _db_feedbacks is not None:
+        return _db_feedbacks.get_feedbacks()
     return _read_feedbacks()
 
 
 def reply_feedback(fb_id: str, reply: str) -> bool:
+    # ── SQLite 路径 ──
+    if _db_feedbacks is not None:
+        return _db_feedbacks.reply_feedback(fb_id, reply)
+
+    # ── JSON 文件回退路径 ──
     with _feedback_lock:
         fbs = _read_feedbacks()
         for fb in fbs:

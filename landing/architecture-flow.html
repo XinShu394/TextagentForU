@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TextAgent 架构流程图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #0a0e27;
+    color: #e0e6ff;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    text-align: center;
+    padding: 40px 20px 20px;
+    background: linear-gradient(180deg, #12183a 0%, #0a0e27 100%);
+  }
+  .header h1 {
+    font-size: 2.4rem;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .header p { color: #8892b0; font-size: 1.05rem; }
+
+  /* ── Tab bar ── */
+  .tabs {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    padding: 20px 0 10px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: #0a0e27cc;
+    backdrop-filter: blur(12px);
+  }
+  .tab-btn {
+    padding: 10px 28px;
+    border: 1.5px solid #334155;
+    border-radius: 999px;
+    background: transparent;
+    color: #94a3b8;
+    font-size: .95rem;
+    cursor: pointer;
+    transition: all .25s;
+  }
+  .tab-btn:hover { border-color: #60a5fa; color: #60a5fa; }
+  .tab-btn.active {
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    border-color: transparent;
+    color: #fff;
+    box-shadow: 0 0 20px #3b82f644;
+  }
+
+  /* ── Canvas wrapper ── */
+  .canvas-wrap {
+    display: none;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+  }
+  .canvas-wrap.active { display: block; }
+
+  /* ── SVG common ── */
+  svg { width: 100%; height: auto; }
+  svg text {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    fill: #e0e6ff;
+  }
+
+  /* ── Flow 1 — Node styles ── */
+  .node-user       { fill: #2563eb; }
+  .node-channel    { fill: #7c3aed; }
+  .node-gateway    { fill: #0891b2; }
+  .node-brain      { fill: #dc2626; }
+  .node-llm        { fill: #d97706; }
+  .node-skill      { fill: #059669; }
+  .node-storage    { fill: #4f46e5; }
+  .node-reply      { fill: #be185d; }
+  .node-decision   { fill: #ca8a04; }
+
+  /* ── Flow 2 — Node styles ── */
+  .node-server     { fill: #1d4ed8; }
+  .node-scheduler  { fill: #9333ea; }
+  .node-job        { fill: #0d9488; }
+  .node-intent     { fill: #ea580c; }
+  .node-rule       { fill: #b91c1c; }
+  .node-action     { fill: #16a34a; }
+  .node-push       { fill: #be185d; }
+
+  /* ── Common shape styles ── */
+  .diamond { stroke-linejoin: round; }
+  .arrow-line {
+    fill: none;
+    stroke: #475569;
+    stroke-width: 2;
+    marker-end: url(#arrowhead);
+  }
+  .arrow-line.highlight {
+    stroke: #60a5fa;
+    stroke-width: 2.5;
+  }
+  .arrow-line.green { stroke: #34d399; }
+  .arrow-line.orange { stroke: #fbbf24; }
+  .arrow-line.red { stroke: #f87171; }
+  .arrow-line.purple { stroke: #a78bfa; }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    margin-bottom: 24px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: .85rem;
+    color: #94a3b8;
+  }
+  .legend-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+  }
+
+  /* ── Section title ── */
+  .section-title {
+    text-align: center;
+    font-size: 1.5rem;
+    margin-bottom: 16px;
+    color: #cbd5e1;
+    letter-spacing: 1px;
+  }
+
+  /* ── Tooltip on hover ── */
+  .node-group { cursor: pointer; }
+  .node-group:hover rect,
+  .node-group:hover polygon {
+    filter: brightness(1.3) drop-shadow(0 0 8px rgba(96,165,250,.5));
+    transition: filter .2s;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .header h1 { font-size: 1.6rem; }
+    .tab-btn { padding: 8px 18px; font-size: .85rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>TextAgent For You · 架构流程图</h1>
+  <p>个人 AI 生活助理系统 — 企业微信 × DeepSeek/Qwen × Obsidian</p>
+</div>
+
+<!-- Tab bar -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab(0)">📱 用户意图 → 反馈</button>
+  <button class="tab-btn" onclick="switchTab(1)">☁️ 云服务器常态化运行</button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ -->
+<!-- FLOW 1: 用户意图 → 反馈 -->
+<!-- ════════════════════════════════════════════════════════ -->
+<div class="canvas-wrap active" id="flow1">
+  <div class="section-title">用户意图 → 系统反馈 完整流程</div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#2563eb"></div>用户/入口</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div>通道层</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#0891b2"></div>网关层</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div>大脑核心</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#d97706"></div>LLM 模型</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#059669"></div>技能执行</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#4f46e5"></div>存储层</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#be185d"></div>回复推送</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ca8a04"></div>决策节点</div>
+  </div>
+
+  <svg viewBox="0 0 1100 1680" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#60a5fa"/>
+      </marker>
+      <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#34d399"/>
+      </marker>
+      <marker id="arrowOrange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#fbbf24"/>
+      </marker>
+      <marker id="arrowRed" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#f87171"/>
+      </marker>
+      <marker id="arrowPurple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#a78bfa"/>
+      </marker>
+      <filter id="glow">
+        <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+        <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+
+    <!-- ═══ ROW 0: 用户 ═══ -->
+    <g class="node-group" transform="translate(440,30)">
+      <rect class="node-user" x="0" y="0" width="220" height="52" rx="26" opacity=".92"/>
+      <text x="110" y="32" text-anchor="middle" font-size="15" font-weight="bold">👤 用户发送消息</text>
+    </g>
+    <text x="550" y="102" text-anchor="middle" font-size="11" fill="#64748b">文字 / 语音 / 图片</text>
+
+    <!-- Arrow: 用户 → 企业微信 -->
+    <line class="arrow-line highlight" x1="550" y1="82" x2="550" y2="120"/>
+
+    <!-- ═══ ROW 1: 企业微信 ═══ -->
+    <g class="node-group" transform="translate(420,120)">
+      <rect class="node-channel" x="0" y="0" width="260" height="50" rx="10" opacity=".9"/>
+      <text x="130" y="20" text-anchor="middle" font-size="13" font-weight="bold">📡 企业微信服务器</text>
+      <text x="130" y="38" text-anchor="middle" font-size="11" fill="#c4b5fd">回调推送 → /wework 端点</text>
+    </g>
+
+    <!-- Arrow: 企微 → 网关 -->
+    <line class="arrow-line highlight" x1="550" y1="170" x2="550" y2="205"/>
+
+    <!-- ═══ ROW 2: 网关解密 ═══ -->
+    <g class="node-group" transform="translate(380,205)">
+      <rect class="node-gateway" x="0" y="0" width="340" height="56" rx="10" opacity=".9"/>
+      <text x="170" y="20" text-anchor="middle" font-size="13" font-weight="bold">🔐 消息网关 (app.py /wework)</text>
+      <text x="170" y="40" text-anchor="middle" font-size="11" fill="#a5f3fc">XML解密 → 去重 → 媒体下载 → ASR转写</text>
+    </g>
+
+    <!-- Arrow: 网关 → 异步转发 -->
+    <line class="arrow-line highlight" x1="550" y1="261" x2="550" y2="295"/>
+
+    <!-- ═══ ROW 3: 异步转发 ═══ -->
+    <g class="node-group" transform="translate(400,295)">
+      <rect class="node-gateway" x="0" y="0" width="300" height="44" rx="8" opacity=".85"/>
+      <text x="150" y="17" text-anchor="middle" font-size="12" font-weight="bold">⚡ 异步转发 → /process</text>
+      <text x="150" y="35" text-anchor="middle" font-size="11" fill="#a5f3fc">200ms内返回"success" 防超时</text>
+    </g>
+
+    <!-- Arrow: 异步 → handle_message -->
+    <line class="arrow-line highlight" x1="550" y1="339" x2="550" y2="370"/>
+
+    <!-- ═══ ROW 4: handle_message ═══ -->
+    <g class="node-group" transform="translate(380,370)">
+      <rect class="node-gateway" x="0" y="0" width="340" height="56" rx="10" opacity=".9"/>
+      <text x="170" y="20" text-anchor="middle" font-size="13" font-weight="bold">📋 handle_message()</text>
+      <text x="170" y="40" text-anchor="middle" font-size="11" fill="#a5f3fc">UserContext获取 → 新用户引导检查 → build_payload</text>
+    </g>
+
+    <!-- Arrow → 新用户判断 -->
+    <line class="arrow-line highlight" x1="550" y1="426" x2="550" y2="460"/>
+
+    <!-- ═══ ROW 5: 新用户引导? ═══ -->
+    <g class="node-group" transform="translate(490,460)">
+      <polygon class="diamond node-decision" points="60,0 120,35 60,70 0,35" opacity=".9"/>
+      <text x="60" y="32" text-anchor="middle" font-size="11" font-weight="bold">新用户?</text>
+      <text x="60" y="45" text-anchor="middle" font-size="10">Onboarding</text>
+    </g>
+
+    <!-- 新用户 → 引导 (右分支) -->
+    <line class="arrow-line orange" x1="610" y1="495" x2="760" y2="495" marker-end="url(#arrowOrange)"/>
+    <g class="node-group" transform="translate(760,475)">
+      <rect class="node-skill" x="0" y="0" width="200" height="40" rx="8" opacity=".85"/>
+      <text x="100" y="25" text-anchor="middle" font-size="12">🎓 4步引导流程</text>
+    </g>
+    <text x="680" y="488" font-size="10" fill="#fbbf24">是</text>
+
+    <!-- 老用户 → brain.process (下) -->
+    <line class="arrow-line highlight" x1="550" y1="530" x2="550" y2="565"/>
+    <text x="560" y="550" font-size="10" fill="#60a5fa">否</text>
+
+    <!-- ═══ ROW 6: brain.process ═══ -->
+    <g class="node-group" transform="translate(370,565)">
+      <rect class="node-brain" x="0" y="0" width="360" height="60" rx="12" opacity=".92" filter="url(#glow)"/>
+      <text x="180" y="22" text-anchor="middle" font-size="14" font-weight="bold">🧠 brain.process() — 核心引擎</text>
+      <text x="180" y="44" text-anchor="middle" font-size="11" fill="#fca5a5">状态/记忆读取 → Prompt构建 → 模型选择</text>
+    </g>
+
+    <!-- Arrow → 模型选择 -->
+    <line class="arrow-line highlight" x1="550" y1="625" x2="550" y2="660"/>
+
+    <!-- ═══ ROW 7: 模型路由 ═══ -->
+    <g class="node-group" transform="translate(480,660)">
+      <polygon class="diamond node-decision" points="70,0 140,42 70,84 0,42" opacity=".9"/>
+      <text x="70" y="36" text-anchor="middle" font-size="11" font-weight="bold">模型路由</text>
+      <text x="70" y="50" text-anchor="middle" font-size="10">select_tier</text>
+    </g>
+
+    <!-- Flash 路径 (左) -->
+    <line class="arrow-line green" x1="480" y1="702" x2="240" y2="702" marker-end="url(#arrowGreen)"/>
+    <line class="arrow-line green" x1="240" y1="702" x2="240" y2="740" marker-end="url(#arrowGreen)"/>
+    <text x="350" y="695" font-size="10" fill="#34d399">简单消息</text>
+    <g class="node-group" transform="translate(140,740)">
+      <rect class="node-llm" x="0" y="0" width="200" height="48" rx="10" opacity=".9"/>
+      <text x="100" y="18" text-anchor="middle" font-size="12" font-weight="bold">⚡ Flash (Qwen)</text>
+      <text x="100" y="36" text-anchor="middle" font-size="10" fill="#fde68a">快速回复 / 闲聊 / 简单查询</text>
+    </g>
+
+    <!-- Main 路径 (中) -->
+    <line class="arrow-line highlight" x1="550" y1="744" x2="550" y2="780"/>
+    <text x="560" y="768" font-size="10" fill="#60a5fa">常规请求</text>
+    <g class="node-group" transform="translate(440,780)">
+      <rect class="node-llm" x="0" y="0" width="220" height="48" rx="10" opacity=".9"/>
+      <text x="110" y="18" text-anchor="middle" font-size="12" font-weight="bold">🔥 Main (DeepSeek V3)</text>
+      <text x="110" y="36" text-anchor="middle" font-size="10" fill="#fde68a">技能调度 / 待办创建 / 笔记管理</text>
+    </g>
+
+    <!-- Think 路径 (右) -->
+    <line class="arrow-line red" x1="620" y1="702" x2="870" y2="702" marker-end="url(#arrowRed)"/>
+    <line class="arrow-line red" x1="870" y1="702" x2="870" y2="740" marker-end="url(#arrowRed)"/>
+    <text x="740" y="695" font-size="10" fill="#f87171">复杂分析</text>
+    <g class="node-group" transform="translate(770,740)">
+      <rect class="node-llm" x="0" y="0" width="200" height="48" rx="10" opacity=".9"/>
+      <text x="100" y="18" text-anchor="middle" font-size="12" font-weight="bold">🤔 Think (DeepSeek R1)</text>
+      <text x="100" y="36" text-anchor="middle" font-size="10" fill="#fde68a">深度分析 / 复杂决策 / 深度回顾</text>
+    </g>
+
+    <!-- 三条路径汇聚 → JSON解析 -->
+    <line class="arrow-line green" x1="240" y1="788" x2="240" y2="880" marker-end="url(#arrowGreen)"/>
+    <line class="arrow-line highlight" x1="550" y1="828" x2="550" y2="860"/>
+    <line class="arrow-line red" x1="870" y1="788" x2="870" y2="880" marker-end="url(#arrowRed)"/>
+    <!-- 汇聚线 -->
+    <line class="arrow-line" x1="240" y1="880" x2="870" y2="880"/>
+    <line class="arrow-line highlight" x1="550" y1="860" x2="550" y2="905"/>
+
+    <!-- ═══ ROW 8: JSON 解析 ═══ -->
+    <g class="node-group" transform="translate(400,905)">
+      <rect class="node-brain" x="0" y="0" width="300" height="48" rx="10" opacity=".88"/>
+      <text x="150" y="18" text-anchor="middle" font-size="13" font-weight="bold">📦 JSON 解析 + 步骤提取</text>
+      <text x="150" y="38" text-anchor="middle" font-size="11" fill="#fca5a5">reply / steps[] / internal_steps[]</text>
+    </g>
+
+    <!-- Arrow → Agent Loop? -->
+    <line class="arrow-line highlight" x1="550" y1="953" x2="550" y2="985"/>
+
+    <!-- ═══ ROW 9: Agent Loop 判断 ═══ -->
+    <g class="node-group" transform="translate(485,985)">
+      <polygon class="diamond node-decision" points="65,0 130,38 65,76 0,38" opacity=".9"/>
+      <text x="65" y="33" text-anchor="middle" font-size="11" font-weight="bold">有 internal</text>
+      <text x="65" y="47" text-anchor="middle" font-size="10">steps?</text>
+    </g>
+
+    <!-- Agent Loop (右) -->
+    <line class="arrow-line purple" x1="615" y1="1023" x2="760" y2="1023" marker-end="url(#arrowPurple)"/>
+    <text x="670" y="1016" font-size="10" fill="#a78bfa">是</text>
+    <g class="node-group" transform="translate(760,1000)">
+      <rect style="fill:#7c3aed" x="0" y="0" width="220" height="46" rx="8" opacity=".85"/>
+      <text x="110" y="17" text-anchor="middle" font-size="12" font-weight="bold">🔄 Agent Loop (≤5轮)</text>
+      <text x="110" y="35" text-anchor="middle" font-size="10" fill="#c4b5fd">内部技能执行 → 再调LLM</text>
+    </g>
+    <!-- 回环箭头 -->
+    <path class="arrow-line purple" d="M 980,1023 Q 1010,1023 1010,950 Q 1010,905 870,905" marker-end="url(#arrowPurple)"/>
+
+    <!-- 无 Agent Loop → 技能执行 -->
+    <line class="arrow-line highlight" x1="550" y1="1061" x2="550" y2="1095"/>
+    <text x="560" y="1080" font-size="10" fill="#60a5fa">否/完成</text>
+
+    <!-- ═══ ROW 10: 技能执行 ═══ -->
+    <g class="node-group" transform="translate(380,1095)">
+      <rect class="node-skill" x="0" y="0" width="340" height="56" rx="10" opacity=".9"/>
+      <text x="170" y="20" text-anchor="middle" font-size="13" font-weight="bold">⚙️ _execute_steps() 技能分发</text>
+      <text x="170" y="42" text-anchor="middle" font-size="11" fill="#a7f3d0">V12 可见性检查 → handler(params, state, ctx)</text>
+    </g>
+
+    <!-- 30+ 技能展示 -->
+    <g transform="translate(50,1100)">
+      <rect style="fill:#064e3b" x="0" y="0" width="280" height="160" rx="8" opacity=".5"/>
+      <text x="140" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="#6ee7b7">30+ 可用技能</text>
+      <text x="14" y="44" font-size="10" fill="#a7f3d0">📝 todo_manage    📓 note_save</text>
+      <text x="14" y="62" font-size="10" fill="#a7f3d0">💡 memo           🔍 deep_dive</text>
+      <text x="14" y="80" font-size="10" fill="#a7f3d0">✅ checkin_flow    📊 daily_report</text>
+      <text x="14" y="98" font-size="10" fill="#a7f3d0">📖 voice_journal   ⚙️ settings</text>
+      <text x="14" y="116" font-size="10" fill="#a7f3d0">🏷️ classify_archive 🧭 decision_track</text>
+      <text x="14" y="134" font-size="10" fill="#a7f3d0">💰 finance_*       📦 data_manage</text>
+      <text x="14" y="152" font-size="10" fill="#a7f3d0">📅 weekly/monthly_review ...</text>
+    </g>
+
+    <!-- 存储交互 (右侧) -->
+    <line class="arrow-line green" x1="720" y1="1123" x2="800" y2="1123" marker-end="url(#arrowGreen)"/>
+    <g class="node-group" transform="translate(800,1095)">
+      <rect class="node-storage" x="0" y="0" width="240" height="56" rx="10" opacity=".85"/>
+      <text x="120" y="20" text-anchor="middle" font-size="12" font-weight="bold">💾 Obsidian 存储层</text>
+      <text x="120" y="40" text-anchor="middle" font-size="10" fill="#a5b4fc">Local IO / OneDrive IO</text>
+    </g>
+    <g transform="translate(800,1160)">
+      <rect style="fill:#1e1b4b" x="0" y="0" width="240" height="80" rx="6" opacity=".5"/>
+      <text x="120" y="20" text-anchor="middle" font-size="11" fill="#818cf8">三级缓存</text>
+      <text x="16" y="40" font-size="10" fill="#a5b4fc">L1: 内存字典 (即时)</text>
+      <text x="16" y="56" font-size="10" fill="#a5b4fc">L2: /tmp 磁盘 (秒级)</text>
+      <text x="16" y="72" font-size="10" fill="#a5b4fc">L3: 文件/API (持久化)</text>
+    </g>
+
+    <!-- Arrow: 技能 → 回复路由 -->
+    <line class="arrow-line highlight" x1="550" y1="1151" x2="550" y2="1290"/>
+
+    <!-- ═══ ROW 11: 回复路由 ═══ -->
+    <g class="node-group" transform="translate(470,1290)">
+      <polygon class="diamond node-decision" points="80,0 160,46 80,92 0,46" opacity=".9"/>
+      <text x="80" y="40" text-anchor="middle" font-size="11" font-weight="bold">回复路由</text>
+      <text x="80" y="54" text-anchor="middle" font-size="10">_resolve_reply</text>
+    </g>
+
+    <!-- 简单回复 (左) -->
+    <line class="arrow-line green" x1="470" y1="1336" x2="280" y2="1336" marker-end="url(#arrowGreen)"/>
+    <text x="360" y="1329" font-size="10" fill="#34d399">简单技能</text>
+    <g class="node-group" transform="translate(120,1316)">
+      <rect class="node-reply" x="0" y="0" width="160" height="40" rx="8" opacity=".85"/>
+      <text x="80" y="25" text-anchor="middle" font-size="12">📤 直接回复</text>
+    </g>
+
+    <!-- Flash 润色 (右) -->
+    <line class="arrow-line orange" x1="630" y1="1336" x2="770" y2="1336" marker-end="url(#arrowOrange)"/>
+    <text x="690" y="1329" font-size="10" fill="#fbbf24">复杂结果</text>
+    <g class="node-group" transform="translate(770,1316)">
+      <rect class="node-llm" x="0" y="0" width="200" height="40" rx="8" opacity=".85"/>
+      <text x="100" y="25" text-anchor="middle" font-size="12">✨ Flash 润色回复</text>
+    </g>
+
+    <!-- 汇聚 → send_fn -->
+    <line class="arrow-line green" x1="200" y1="1356" x2="200" y2="1420" marker-end="url(#arrowGreen)"/>
+    <line class="arrow-line orange" x1="870" y1="1356" x2="870" y2="1420" marker-end="url(#arrowOrange)"/>
+    <line class="arrow-line" x1="200" y1="1420" x2="870" y2="1420"/>
+    <line class="arrow-line highlight" x1="550" y1="1420" x2="550" y2="1450"/>
+
+    <!-- ═══ ROW 12: 发送 ═══ -->
+    <g class="node-group" transform="translate(390,1450)">
+      <rect class="node-reply" x="0" y="0" width="320" height="52" rx="10" opacity=".92"/>
+      <text x="160" y="20" text-anchor="middle" font-size="13" font-weight="bold">📨 channel_router.send_fn()</text>
+      <text x="160" y="40" text-anchor="middle" font-size="11" fill="#fda4af">富文本 / Markdown / 文本 / 语音卡片</text>
+    </g>
+
+    <!-- Arrow → 异步保存 -->
+    <line class="arrow-line highlight" x1="550" y1="1502" x2="550" y2="1530"/>
+
+    <!-- ═══ ROW 13: 异步保存 ═══ -->
+    <g class="node-group" transform="translate(380,1530)">
+      <rect class="node-storage" x="0" y="0" width="340" height="44" rx="8" opacity=".85"/>
+      <text x="170" y="17" text-anchor="middle" font-size="12" font-weight="bold">💾 异步保存 state / memory / conversation</text>
+      <text x="170" y="35" text-anchor="middle" font-size="11" fill="#a5b4fc">Quick-Notes 二阶过滤 (规则 + Flash)</text>
+    </g>
+
+    <!-- Arrow → 回到企微 -->
+    <line class="arrow-line highlight" x1="550" y1="1574" x2="550" y2="1600"/>
+
+    <!-- ═══ ROW 14: 用户收到 ═══ -->
+    <g class="node-group" transform="translate(420,1600)">
+      <rect class="node-user" x="0" y="0" width="260" height="52" rx="26" opacity=".92"/>
+      <text x="130" y="21" text-anchor="middle" font-size="14" font-weight="bold">👤 用户收到回复</text>
+      <text x="130" y="41" text-anchor="middle" font-size="11" fill="#93c5fd">企业微信 App 消息推送</text>
+    </g>
+  </svg>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ -->
+<!-- FLOW 2: 云服务器常态化运行 -->
+<!-- ════════════════════════════════════════════════════════ -->
+<div class="canvas-wrap" id="flow2">
+  <div class="section-title">云服务器常态化运行流程</div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1d4ed8"></div>服务器核心</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#9333ea"></div>调度引擎</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#0d9488"></div>定时任务</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ea580c"></div>意图队列</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#b91c1c"></div>规则引擎</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div>执行动作</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#be185d"></div>消息推送</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ca8a04"></div>决策节点</div>
+  </div>
+
+  <svg viewBox="0 0 1100 2200" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ah2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#60a5fa"/>
+      </marker>
+      <marker id="ah2g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#34d399"/>
+      </marker>
+      <marker id="ah2o" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#fbbf24"/>
+      </marker>
+      <marker id="ah2r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#f87171"/>
+      </marker>
+      <marker id="ah2p" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#a78bfa"/>
+      </marker>
+    </defs>
+
+    <!-- ═══ 服务器启动 ═══ -->
+    <g class="node-group" transform="translate(400,30)">
+      <rect class="node-server" x="0" y="0" width="300" height="56" rx="28" opacity=".92"/>
+      <text x="150" y="23" text-anchor="middle" font-size="14" font-weight="bold">🚀 Flask 服务器启动</text>
+      <text x="150" y="43" text-anchor="middle" font-size="11" fill="#93c5fd">app.py → threaded=True</text>
+    </g>
+
+    <!-- 三条初始化分支 -->
+    <line class="arrow-line highlight" x1="550" y1="86" x2="550" y2="110"/>
+    <line x1="200" y1="110" x2="900" y2="110" stroke="#334155" stroke-width="1.5"/>
+
+    <!-- 左: 端点注册 -->
+    <line class="arrow-line" x1="200" y1="110" x2="200" y2="150" marker-end="url(#ah2)"/>
+    <g class="node-group" transform="translate(80,150)">
+      <rect class="node-server" x="0" y="0" width="240" height="50" rx="8" opacity=".85"/>
+      <text x="120" y="18" text-anchor="middle" font-size="12" font-weight="bold">📡 端点注册</text>
+      <text x="120" y="37" text-anchor="middle" font-size="10" fill="#93c5fd">/wework  /process  /system</text>
+    </g>
+
+    <!-- 中: APScheduler -->
+    <line class="arrow-line highlight" x1="550" y1="110" x2="550" y2="150"/>
+    <g class="node-group" transform="translate(400,150)">
+      <rect class="node-scheduler" x="0" y="0" width="300" height="50" rx="8" opacity=".9" filter="url(#glow)"/>
+      <text x="150" y="18" text-anchor="middle" font-size="13" font-weight="bold">⏰ APScheduler 初始化</text>
+      <text x="150" y="37" text-anchor="middle" font-size="10" fill="#d8b4fe">BackgroundScheduler → 7个定时任务</text>
+    </g>
+
+    <!-- 右: 用户上下文 -->
+    <line class="arrow-line" x1="900" y1="110" x2="900" y2="150" marker-end="url(#ah2)"/>
+    <g class="node-group" transform="translate(780,150)">
+      <rect class="node-storage" x="0" y="0" width="240" height="50" rx="8" opacity=".85"/>
+      <text x="120" y="18" text-anchor="middle" font-size="12" font-weight="bold">👥 用户上下文加载</text>
+      <text x="120" y="37" text-anchor="middle" font-size="10" fill="#a5b4fc">UserContext / 多用户隔离</text>
+    </g>
+
+    <!-- ═══ 7个定时任务展示 ═══ -->
+    <line class="arrow-line highlight" x1="550" y1="200" x2="550" y2="240"/>
+
+    <g transform="translate(80,240)">
+      <rect style="fill:#1e1b4b; stroke:#4c1d95; stroke-width:1.5" x="0" y="0" width="940" height="180" rx="12" opacity=".6"/>
+      <text x="470" y="25" text-anchor="middle" font-size="14" font-weight="bold" fill="#c4b5fd">📅 V8 智能调度引擎 — 7 个内置定时任务</text>
+
+      <!-- Job 1 -->
+      <g class="node-group" transform="translate(20,45)">
+        <rect class="node-job" x="0" y="0" width="190" height="52" rx="8" opacity=".9"/>
+        <text x="95" y="20" text-anchor="middle" font-size="11" font-weight="bold">🌅 daily_init</text>
+        <text x="95" y="38" text-anchor="middle" font-size="10" fill="#99f6e4">cron 05:00 → 生成意图队列</text>
+      </g>
+
+      <!-- Job 2 -->
+      <g class="node-group" transform="translate(230,45)">
+        <rect class="node-job" x="0" y="0" width="190" height="52" rx="8" opacity=".9"/>
+        <text x="95" y="20" text-anchor="middle" font-size="11" font-weight="bold">⏱️ todo_remind_tick</text>
+        <text x="95" y="38" text-anchor="middle" font-size="10" fill="#99f6e4">interval 1min → 待办提醒</text>
+      </g>
+
+      <!-- Job 3 -->
+      <g class="node-group" transform="translate(440,45)">
+        <rect class="node-job" x="0" y="0" width="190" height="52" rx="8" opacity=".9"/>
+        <text x="95" y="20" text-anchor="middle" font-size="11" font-weight="bold">💓 scheduler_tick</text>
+        <text x="95" y="38" text-anchor="middle" font-size="10" fill="#99f6e4">interval 30min → 心跳评估</text>
+      </g>
+
+      <!-- Job 4 -->
+      <g class="node-group" transform="translate(650,45)">
+        <rect class="node-job" x="0" y="0" width="270" height="52" rx="8" opacity=".9"/>
+        <text x="135" y="20" text-anchor="middle" font-size="11" font-weight="bold">🔄 refresh_cache</text>
+        <text x="135" y="38" text-anchor="middle" font-size="10" fill="#99f6e4">interval 30min → 刷新用户/配置缓存</text>
+      </g>
+
+      <!-- Job 5, 6, 7 -->
+      <g class="node-group" transform="translate(20,115)">
+        <rect class="node-job" x="0" y="0" width="280" height="48" rx="8" opacity=".85"/>
+        <text x="140" y="18" text-anchor="middle" font-size="11" font-weight="bold">📊 weekly_review_trigger</text>
+        <text x="140" y="36" text-anchor="middle" font-size="10" fill="#99f6e4">cron 周日 21:00 → 周报</text>
+      </g>
+      <g class="node-group" transform="translate(330,115)">
+        <rect class="node-job" x="0" y="0" width="280" height="48" rx="8" opacity=".85"/>
+        <text x="140" y="18" text-anchor="middle" font-size="11" font-weight="bold">📈 monthly_review_trigger</text>
+        <text x="140" y="36" text-anchor="middle" font-size="10" fill="#99f6e4">cron 月末 21:30 → 月报</text>
+      </g>
+      <g class="node-group" transform="translate(640,115)">
+        <rect class="node-job" x="0" y="0" width="280" height="48" rx="8" opacity=".85"/>
+        <text x="140" y="18" text-anchor="middle" font-size="11" font-weight="bold">💰 finance_daily_snapshot</text>
+        <text x="140" y="36" text-anchor="middle" font-size="10" fill="#99f6e4">cron 18:00 → 财务快照</text>
+      </g>
+    </g>
+
+    <!-- ═══ 两条主运行通路 ═══ -->
+    <text x="550" y="450" text-anchor="middle" font-size="13" font-weight="bold" fill="#94a3b8">▼ 两条核心运行通路 ▼</text>
+
+    <!-- ━━━ 通路 A: 待办提醒循环 (左侧) ━━━ -->
+    <g transform="translate(30,480)">
+      <rect style="fill:#0c1f1f; stroke:#0d9488; stroke-width:1.5; stroke-dasharray:6,3" x="0" y="0" width="480" height="520" rx="12" opacity=".5"/>
+      <text x="240" y="25" text-anchor="middle" font-size="13" font-weight="bold" fill="#2dd4bf">通路 A：待办提醒循环（每 1 分钟）</text>
+    </g>
+
+    <!-- todo_remind_tick -->
+    <g class="node-group" transform="translate(110,520)">
+      <rect class="node-job" x="0" y="0" width="280" height="44" rx="8" opacity=".9"/>
+      <text x="140" y="17" text-anchor="middle" font-size="12" font-weight="bold">⏱️ todo_remind_tick 触发</text>
+      <text x="140" y="35" text-anchor="middle" font-size="10" fill="#99f6e4">遍历所有活跃用户</text>
+    </g>
+
+    <!-- Arrow -->
+    <line x1="250" y1="564" x2="250" y2="590" stroke="#2dd4bf" stroke-width="2" marker-end="url(#ah2g)"/>
+
+    <!-- 预检 -->
+    <g class="node-group" transform="translate(110,590)">
+      <rect class="node-gateway" x="0" y="0" width="280" height="44" rx="8" opacity=".85"/>
+      <text x="140" y="17" text-anchor="middle" font-size="12" font-weight="bold">🔍 快速预检 has_potential</text>
+      <text x="140" y="35" text-anchor="middle" font-size="10" fill="#a5f3fc">30min窗口 / HH:MM兜底 / due_date</text>
+    </g>
+
+    <line x1="250" y1="634" x2="250" y2="660" stroke="#2dd4bf" stroke-width="2" marker-end="url(#ah2g)"/>
+
+    <!-- check_todos -->
+    <g class="node-group" transform="translate(90,660)">
+      <rect class="node-skill" x="0" y="0" width="320" height="56" rx="10" opacity=".9"/>
+      <text x="160" y="20" text-anchor="middle" font-size="12" font-weight="bold">⚙️ check_todos() 核心引擎</text>
+      <text x="160" y="42" text-anchor="middle" font-size="10" fill="#a7f3d0">格式修复 → 时间判断 → 预提醒/正式提醒</text>
+    </g>
+
+    <line x1="250" y1="716" x2="250" y2="745" stroke="#2dd4bf" stroke-width="2" marker-end="url(#ah2g)"/>
+
+    <!-- 决策: 需要提醒? -->
+    <g class="node-group" transform="translate(195,745)">
+      <polygon class="diamond node-decision" points="55,0 110,32 55,64 0,32" opacity=".9"/>
+      <text x="55" y="28" text-anchor="middle" font-size="10" font-weight="bold">需提醒?</text>
+      <text x="55" y="42" text-anchor="middle" font-size="9">diff ≤ 30min</text>
+    </g>
+
+    <!-- 是 → 推送 -->
+    <line x1="250" y1="809" x2="250" y2="835" stroke="#2dd4bf" stroke-width="2" marker-end="url(#ah2g)"/>
+    <text x="260" y="825" font-size="10" fill="#34d399">是</text>
+
+    <g class="node-group" transform="translate(110,835)">
+      <rect class="node-push" x="0" y="0" width="280" height="50" rx="8" opacity=".9"/>
+      <text x="140" y="18" text-anchor="middle" font-size="12" font-weight="bold">📨 推送提醒消息</text>
+      <text x="140" y="38" text-anchor="middle" font-size="10" fill="#fda4af">channel_router → 企业微信</text>
+    </g>
+
+    <line x1="250" y1="885" x2="250" y2="910" stroke="#2dd4bf" stroke-width="2" marker-end="url(#ah2g)"/>
+
+    <!-- 过期处理 -->
+    <g class="node-group" transform="translate(110,910)">
+      <rect class="node-rule" x="0" y="0" width="280" height="50" rx="8" opacity=".85"/>
+      <text x="140" y="18" text-anchor="middle" font-size="12" font-weight="bold">🗑️ 过期 / 僵尸清理</text>
+      <text x="140" y="38" text-anchor="middle" font-size="10" fill="#fca5a5">60min自动完成 / 2h僵尸清理</text>
+    </g>
+
+    <!-- 回环 -->
+    <path d="M 250,960 L 250,980 Q 250,990 80,990 Q 50,990 50,540 Q 50,520 110,520" stroke="#2dd4bf" stroke-width="1.5" fill="none" stroke-dasharray="5,4" marker-end="url(#ah2g)"/>
+    <text x="55" y="760" font-size="10" fill="#2dd4bf" transform="rotate(-90,55,760)">每 1 分钟循环</text>
+
+    <!-- ━━━ 通路 B: 智能调度循环 (右侧) ━━━ -->
+    <g transform="translate(560,480)">
+      <rect style="fill:#1a0c2e; stroke:#9333ea; stroke-width:1.5; stroke-dasharray:6,3" x="0" y="0" width="500" height="900" rx="12" opacity=".5"/>
+      <text x="250" y="25" text-anchor="middle" font-size="13" font-weight="bold" fill="#c084fc">通路 B：V8 智能调度循环（每 30 分钟）</text>
+    </g>
+
+    <!-- daily_init -->
+    <g class="node-group" transform="translate(640,520)">
+      <rect class="node-scheduler" x="0" y="0" width="340" height="56" rx="10" opacity=".9"/>
+      <text x="170" y="20" text-anchor="middle" font-size="12" font-weight="bold">🌅 _daily_init() — 05:00 触发</text>
+      <text x="170" y="42" text-anchor="middle" font-size="10" fill="#d8b4fe">生成当日意图队列 → 写入 state.scheduler</text>
+    </g>
+
+    <!-- 意图队列 -->
+    <line x1="810" y1="576" x2="810" y2="605" stroke="#a78bfa" stroke-width="2" marker-end="url(#ah2p)"/>
+
+    <g transform="translate(630,605)">
+      <rect style="fill:#2e1065; stroke:#7c3aed; stroke-width:1" x="0" y="0" width="360" height="145" rx="8" opacity=".7"/>
+      <text x="180" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="#c4b5fd">📋 今日意图队列 (per user)</text>
+
+      <g class="node-group" transform="translate(12,35)">
+        <rect class="node-intent" x="0" y="0" width="155" height="32" rx="6" opacity=".9"/>
+        <text x="78" y="21" text-anchor="middle" font-size="10">🌤️ morning_report 07-10</text>
+      </g>
+      <g class="node-group" transform="translate(180,35)">
+        <rect class="node-intent" x="0" y="0" width="165" height="32" rx="6" opacity=".9"/>
+        <text x="83" y="21" text-anchor="middle" font-size="10">💬 companion_task 11-13</text>
+      </g>
+      <g class="node-group" transform="translate(12,75)">
+        <rect class="node-intent" x="0" y="0" width="155" height="32" rx="6" opacity=".9"/>
+        <text x="78" y="21" text-anchor="middle" font-size="10">🔔 nudge 14-18</text>
+      </g>
+      <g class="node-group" transform="translate(180,75)">
+        <rect class="node-intent" x="0" y="0" width="165" height="32" rx="6" opacity=".9"/>
+        <text x="83" y="21" text-anchor="middle" font-size="10">✅ evening_checkin 20-22</text>
+      </g>
+      <g class="node-group" transform="translate(12,115)">
+        <rect class="node-intent" x="0" y="0" width="155" height="32" rx="6" opacity=".9"/>
+        <text x="78" y="21" text-anchor="middle" font-size="10">📊 daily_report 21-23</text>
+      </g>
+      <g class="node-group" transform="translate(180,115)">
+        <rect style="fill:#525252" x="0" y="0" width="165" height="32" rx="6" opacity=".7"/>
+        <text x="83" y="21" text-anchor="middle" font-size="10" fill="#a3a3a3">... 更多自定义意图</text>
+      </g>
+    </g>
+
+    <!-- Arrow: 意图 → scheduler_tick -->
+    <line x1="810" y1="750" x2="810" y2="785" stroke="#a78bfa" stroke-width="2" marker-end="url(#ah2p)"/>
+
+    <!-- scheduler_tick -->
+    <g class="node-group" transform="translate(640,785)">
+      <rect class="node-scheduler" x="0" y="0" width="340" height="50" rx="10" opacity=".9" filter="url(#glow)"/>
+      <text x="170" y="19" text-anchor="middle" font-size="13" font-weight="bold">💓 _scheduler_tick() — 心跳</text>
+      <text x="170" y="38" text-anchor="middle" font-size="10" fill="#d8b4fe">遍历 pending 意图 → _rule_evaluate</text>
+    </g>
+
+    <!-- Arrow: tick → rule_evaluate -->
+    <line x1="810" y1="835" x2="810" y2="870" stroke="#a78bfa" stroke-width="2" marker-end="url(#ah2p)"/>
+
+    <!-- rule_evaluate -->
+    <g class="node-group" transform="translate(630,870)">
+      <rect class="node-rule" x="0" y="0" width="360" height="90" rx="10" opacity=".9"/>
+      <text x="180" y="20" text-anchor="middle" font-size="13" font-weight="bold">🎯 _rule_evaluate() 规则引擎</text>
+      <text x="180" y="40" text-anchor="middle" font-size="10" fill="#fca5a5">① 时间窗口检查 (earliest ~ latest)</text>
+      <text x="180" y="56" text-anchor="middle" font-size="10" fill="#fca5a5">② 用户节律匹配 (avg_wake_time)</text>
+      <text x="180" y="72" text-anchor="middle" font-size="10" fill="#fca5a5">③ 推送限额 (max 3次/天)</text>
+    </g>
+
+    <!-- Arrow: rule → 决策 -->
+    <line x1="810" y1="960" x2="810" y2="995" stroke="#a78bfa" stroke-width="2" marker-end="url(#ah2p)"/>
+
+    <!-- 决策: 结果 -->
+    <g class="node-group" transform="translate(745,995)">
+      <polygon class="diamond node-decision" points="65,0 130,38 65,76 0,38" opacity=".9"/>
+      <text x="65" y="33" text-anchor="middle" font-size="11" font-weight="bold">评估</text>
+      <text x="65" y="47" text-anchor="middle" font-size="10">结果?</text>
+    </g>
+
+    <!-- execute (下) -->
+    <line x1="810" y1="1071" x2="810" y2="1100" stroke="#34d399" stroke-width="2" marker-end="url(#ah2g)"/>
+    <text x="820" y="1090" font-size="10" fill="#34d399">execute</text>
+
+    <!-- wait (右) -->
+    <line x1="875" y1="1033" x2="1020" y2="1033" stroke="#fbbf24" stroke-width="2" marker-end="url(#ah2o)"/>
+    <text x="940" y="1026" font-size="10" fill="#fbbf24">wait</text>
+    <g class="node-group" transform="translate(1020,1016)">
+      <rect style="fill:#525252" x="0" y="0" width="40" height="34" rx="6" opacity=".6"/>
+      <text x="20" y="22" text-anchor="middle" font-size="11">⏳</text>
+    </g>
+
+    <!-- skip (左) -->
+    <line x1="745" y1="1033" x2="620" y2="1033" stroke="#f87171" stroke-width="2" marker-end="url(#ah2r)"/>
+    <text x="672" y="1026" font-size="10" fill="#f87171">skip</text>
+    <g class="node-group" transform="translate(580,1016)">
+      <rect style="fill:#525252" x="0" y="0" width="40" height="34" rx="6" opacity=".6"/>
+      <text x="20" y="22" text-anchor="middle" font-size="11">⏭️</text>
+    </g>
+
+    <!-- 执行意图 -->
+    <g class="node-group" transform="translate(640,1100)">
+      <rect class="node-action" x="0" y="0" width="340" height="50" rx="10" opacity=".9"/>
+      <text x="170" y="19" text-anchor="middle" font-size="13" font-weight="bold">🚀 执行意图 → /system 端点</text>
+      <text x="170" y="38" text-anchor="middle" font-size="10" fill="#bbf7d0">触发对应技能: brain.process(system)</text>
+    </g>
+
+    <!-- 5个执行结果 -->
+    <line x1="810" y1="1150" x2="810" y2="1180" stroke="#34d399" stroke-width="2" marker-end="url(#ah2g)"/>
+
+    <g transform="translate(595,1180)">
+      <rect style="fill:#052e16; stroke:#16a34a; stroke-width:1" x="0" y="0" width="430" height="140" rx="8" opacity=".6"/>
+      <text x="215" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="#86efac">🎬 可执行的系统意图类型</text>
+
+      <g class="node-group" transform="translate(12,38)">
+        <rect class="node-action" x="0" y="0" width="125" height="36" rx="6" opacity=".85"/>
+        <text x="63" y="15" text-anchor="middle" font-size="10" font-weight="bold">🌤️ 晨报</text>
+        <text x="63" y="30" text-anchor="middle" font-size="9" fill="#bbf7d0">morning_report</text>
+      </g>
+      <g class="node-group" transform="translate(150,38)">
+        <rect class="node-action" x="0" y="0" width="125" height="36" rx="6" opacity=".85"/>
+        <text x="63" y="15" text-anchor="middle" font-size="10" font-weight="bold">💬 陪伴</text>
+        <text x="63" y="30" text-anchor="middle" font-size="9" fill="#bbf7d0">companion_task</text>
+      </g>
+      <g class="node-group" transform="translate(290,38)">
+        <rect class="node-action" x="0" y="0" width="125" height="36" rx="6" opacity=".85"/>
+        <text x="63" y="15" text-anchor="middle" font-size="10" font-weight="bold">🔔 轻推</text>
+        <text x="63" y="30" text-anchor="middle" font-size="9" fill="#bbf7d0">nudge</text>
+      </g>
+      <g class="node-group" transform="translate(12,88)">
+        <rect class="node-action" x="0" y="0" width="125" height="36" rx="6" opacity=".85"/>
+        <text x="63" y="15" text-anchor="middle" font-size="10" font-weight="bold">✅ 晚签到</text>
+        <text x="63" y="30" text-anchor="middle" font-size="9" fill="#bbf7d0">evening_checkin</text>
+      </g>
+      <g class="node-group" transform="translate(150,88)">
+        <rect class="node-action" x="0" y="0" width="125" height="36" rx="6" opacity=".85"/>
+        <text x="63" y="15" text-anchor="middle" font-size="10" font-weight="bold">📊 日报</text>
+        <text x="63" y="30" text-anchor="middle" font-size="9" fill="#bbf7d0">daily_report</text>
+      </g>
+      <g class="node-group" transform="translate(290,88)">
+        <rect style="fill:#525252" x="0" y="0" width="125" height="36" rx="6" opacity=".7"/>
+        <text x="63" y="15" text-anchor="middle" font-size="10" font-weight="bold" fill="#a3a3a3">📅 周/月报</text>
+        <text x="63" y="30" text-anchor="middle" font-size="9" fill="#a3a3a3">review_trigger</text>
+      </g>
+    </g>
+
+    <!-- Arrow: 执行 → 推送 -->
+    <line x1="810" y1="1320" x2="810" y2="1355" stroke="#a78bfa" stroke-width="2" marker-end="url(#ah2p)"/>
+
+    <!-- 推送 -->
+    <g class="node-group" transform="translate(640,1355)">
+      <rect class="node-push" x="0" y="0" width="340" height="50" rx="10" opacity=".92"/>
+      <text x="170" y="19" text-anchor="middle" font-size="13" font-weight="bold">📨 channel_router → 企业微信推送</text>
+      <text x="170" y="38" text-anchor="middle" font-size="10" fill="#fda4af">Markdown / 文本 / 卡片消息</text>
+    </g>
+
+    <!-- 回环 -->
+    <path d="M 810,1405 L 810,1420 Q 810,1435 1070,1435 Q 1080,1435 1080,800 Q 1080,785 980,785" stroke="#a78bfa" stroke-width="1.5" fill="none" stroke-dasharray="5,4" marker-end="url(#ah2p)"/>
+    <text x="1075" y="1110" font-size="10" fill="#a78bfa" transform="rotate(-90,1075,1110)">每 30 分钟心跳循环</text>
+
+    <!-- ═══ 底部: 持续运行说明 ═══ -->
+    <g transform="translate(80,1480)">
+      <rect style="fill:#111827; stroke:#334155; stroke-width:1.5" x="0" y="0" width="940" height="210" rx="12" opacity=".7"/>
+      <text x="470" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">🔁 系统持续运行状态总览</text>
+
+      <!-- 时间轴 -->
+      <line x1="50" y1="60" x2="890" y2="60" stroke="#475569" stroke-width="2"/>
+
+      <!-- 时间点 -->
+      <circle cx="100" cy="60" r="8" fill="#1d4ed8"/>
+      <text x="100" y="52" text-anchor="middle" font-size="9" fill="#93c5fd">05:00</text>
+      <text x="100" y="82" text-anchor="middle" font-size="9" fill="#64748b">daily_init</text>
+
+      <circle cx="220" cy="60" r="6" fill="#0d9488"/>
+      <text x="220" y="52" text-anchor="middle" font-size="9" fill="#2dd4bf">07~10</text>
+      <text x="220" y="82" text-anchor="middle" font-size="9" fill="#64748b">晨报</text>
+
+      <circle cx="340" cy="60" r="6" fill="#0d9488"/>
+      <text x="340" y="52" text-anchor="middle" font-size="9" fill="#2dd4bf">11~13</text>
+      <text x="340" y="82" text-anchor="middle" font-size="9" fill="#64748b">陪伴</text>
+
+      <circle cx="460" cy="60" r="6" fill="#0d9488"/>
+      <text x="460" y="52" text-anchor="middle" font-size="9" fill="#2dd4bf">14~18</text>
+      <text x="460" y="82" text-anchor="middle" font-size="9" fill="#64748b">轻推</text>
+
+      <circle cx="580" cy="60" r="6" fill="#ea580c"/>
+      <text x="580" y="52" text-anchor="middle" font-size="9" fill="#fb923c">18:00</text>
+      <text x="580" y="82" text-anchor="middle" font-size="9" fill="#64748b">财务快照</text>
+
+      <circle cx="700" cy="60" r="6" fill="#0d9488"/>
+      <text x="700" y="52" text-anchor="middle" font-size="9" fill="#2dd4bf">20~22</text>
+      <text x="700" y="82" text-anchor="middle" font-size="9" fill="#64748b">晚签到</text>
+
+      <circle cx="820" cy="60" r="6" fill="#0d9488"/>
+      <text x="820" y="52" text-anchor="middle" font-size="9" fill="#2dd4bf">21~23</text>
+      <text x="820" y="82" text-anchor="middle" font-size="9" fill="#64748b">日报</text>
+
+      <!-- 常驻标注 -->
+      <rect x="50" y="100" width="840" height="22" rx="4" fill="#0d9488" opacity=".2"/>
+      <text x="470" y="116" text-anchor="middle" font-size="10" fill="#2dd4bf">⏱️ todo_remind_tick — 每 1 分钟全天运行，遍历所有用户的待办提醒</text>
+
+      <rect x="50" y="130" width="840" height="22" rx="4" fill="#9333ea" opacity=".2"/>
+      <text x="470" y="146" text-anchor="middle" font-size="10" fill="#c084fc">💓 scheduler_tick — 每 30 分钟心跳，评估并执行当日意图队列</text>
+
+      <rect x="50" y="160" width="840" height="22" rx="4" fill="#1d4ed8" opacity=".2"/>
+      <text x="470" y="176" text-anchor="middle" font-size="10" fill="#93c5fd">📡 /wework 端点 — 全天候监听，随时响应用户消息（见流程图一）</text>
+
+      <rect x="50" y="190" width="280" height="18" rx="4" fill="#525252" opacity=".3"/>
+      <text x="190" y="203" text-anchor="middle" font-size="9" fill="#94a3b8">📊 周日 21:00 周报 | 月末 21:30 月报</text>
+    </g>
+
+    <!-- ═══ 用户节律学习 ═══ -->
+    <g transform="translate(80,1720)">
+      <rect style="fill:#1c1917; stroke:#a16207; stroke-width:1.5" x="0" y="0" width="940" height="120" rx="12" opacity=".6"/>
+      <text x="470" y="25" text-anchor="middle" font-size="13" font-weight="bold" fill="#fbbf24">🧬 用户节律学习机制</text>
+
+      <text x="50" y="52" font-size="11" fill="#d4d4d8">📱 用户消息时间 → 追踪 wake/sleep 模式</text>
+      <text x="50" y="72" font-size="11" fill="#d4d4d8">📊 滑动窗口统计 → avg_wake_time / avg_sleep_time</text>
+      <text x="50" y="92" font-size="11" fill="#d4d4d8">🎯 动态调整 → 晨报推送时间 / 晚签到时间 / 陪伴窗口</text>
+      <text x="50" y="112" font-size="11" fill="#d4d4d8">⚙️ _rule_evaluate 会参考用户节律，在用户活跃时段推送</text>
+
+      <g transform="translate(520,40)">
+        <rect style="fill:#422006" x="0" y="0" width="400" height="70" rx="8" opacity=".5"/>
+        <text x="200" y="20" text-anchor="middle" font-size="10" fill="#fde68a">示例：某用户节律</text>
+        <text x="20" y="40" font-size="10" fill="#fbbf24">avg_wake: 07:30  →  晨报 earliest=07:30</text>
+        <text x="20" y="58" font-size="10" fill="#fbbf24">avg_sleep: 23:00  →  日报 latest=23:00</text>
+      </g>
+    </g>
+
+    <!-- ═══ 多用户隔离 ═══ -->
+    <g transform="translate(80,1870)">
+      <rect style="fill:#0c1929; stroke:#1d4ed8; stroke-width:1.5" x="0" y="0" width="940" height="100" rx="12" opacity=".6"/>
+      <text x="470" y="25" text-anchor="middle" font-size="13" font-weight="bold" fill="#60a5fa">👥 多用户隔离架构</text>
+
+      <g transform="translate(30,42)">
+        <rect style="fill:#1e3a5f" x="0" y="0" width="180" height="44" rx="8" opacity=".7"/>
+        <text x="90" y="18" text-anchor="middle" font-size="11" fill="#93c5fd">User A</text>
+        <text x="90" y="35" text-anchor="middle" font-size="9" fill="#64748b">state/memory/files</text>
+      </g>
+      <g transform="translate(240,42)">
+        <rect style="fill:#1e3a5f" x="0" y="0" width="180" height="44" rx="8" opacity=".7"/>
+        <text x="90" y="18" text-anchor="middle" font-size="11" fill="#93c5fd">User B</text>
+        <text x="90" y="35" text-anchor="middle" font-size="9" fill="#64748b">state/memory/files</text>
+      </g>
+      <g transform="translate(450,42)">
+        <rect style="fill:#1e3a5f" x="0" y="0" width="180" height="44" rx="8" opacity=".7"/>
+        <text x="90" y="18" text-anchor="middle" font-size="11" fill="#93c5fd">User C</text>
+        <text x="90" y="35" text-anchor="middle" font-size="9" fill="#64748b">state/memory/files</text>
+      </g>
+      <g transform="translate(660,42)">
+        <rect style="fill:#374151" x="0" y="0" width="260" height="44" rx="8" opacity=".5"/>
+        <text x="130" y="18" text-anchor="middle" font-size="11" fill="#9ca3af">... 更多用户</text>
+        <text x="130" y="35" text-anchor="middle" font-size="9" fill="#6b7280">UserContext 完全隔离</text>
+      </g>
+    </g>
+
+    <!-- ═══ 部署方式 ═══ -->
+    <g transform="translate(80,2000)">
+      <rect style="fill:#18181b; stroke:#3f3f46; stroke-width:1" x="0" y="0" width="940" height="80" rx="12" opacity=".6"/>
+      <text x="470" y="25" text-anchor="middle" font-size="13" font-weight="bold" fill="#a1a1aa">🏗️ 部署架构</text>
+
+      <g transform="translate(30,40)">
+        <rect style="fill:#1e3a5f" x="0" y="0" width="260" height="30" rx="6" opacity=".7"/>
+        <text x="130" y="20" text-anchor="middle" font-size="10" fill="#93c5fd">🐳 Docker Compose 容器化部署</text>
+      </g>
+      <g transform="translate(320,40)">
+        <rect style="fill:#1e3a5f" x="0" y="0" width="290" height="30" rx="6" opacity=".7"/>
+        <text x="145" y="20" text-anchor="middle" font-size="10" fill="#93c5fd">☁️ 腾讯云 SCF 无服务器 (定时触发)</text>
+      </g>
+      <g transform="translate(640,40)">
+        <rect style="fill:#1e3a5f" x="0" y="0" width="280" height="30" rx="6" opacity=".7"/>
+        <text x="140" y="20" text-anchor="middle" font-size="10" fill="#93c5fd">💻 本地开发 Flask + PowerShell</text>
+      </g>
+    </g>
+  </svg>
+</div>
+
+<script>
+  function switchTab(idx) {
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === idx);
+    });
+    document.querySelectorAll('.canvas-wrap').forEach((w, i) => {
+      w.classList.toggle('active', i === idx);
+    });
+  }
+</script>
+</body>
+</html>

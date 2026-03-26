@@ -27,6 +27,8 @@ desktop.ini
 # IDE
 .vscode/
 .idea/
+.workbuddy/
+.codebuddy/
 
 # 部署临时文件
 *.tar.gz

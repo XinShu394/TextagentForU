@@ -36,6 +36,10 @@ from config import (
     SCHEDULER_WEEKEND_SHIFT, SCHEDULER_PUSH_MAX_DAILY, SCHEDULER_MIN_PUSH_GAP,
     SERVER_PORT,
 )
+from time_utils import (
+    parse_hhmm, format_minutes, add_minutes as _add_minutes_v9,
+    safe_parse_hhmm, now_as_minutes,
+)
 from user_context import (
     get_or_create_user, get_all_active_users,
     increment_message_count, is_user_suspended,
@@ -1094,6 +1098,11 @@ def system_endpoint():
                                 has_potential = True
                                 break
                             continue
+                        # 【修复】一次性待办 remind_at 为纯 HH:MM（格式异常），
+                        # 也标记为有潜力，让 check_todos 中的运行时兜底逻辑去修复和处理
+                        if remind_at and len(remind_at) <= 5 and not t.get("recur"):
+                            has_potential = True
+                            break
                         # 截止日期提醒
                         due_date = t.get("due_date", "")
                         if due_date:
@@ -1123,7 +1132,7 @@ def system_endpoint():
             _log(f"[todo_remind_tick] 检查完成, 共推送 {total_sent} 条")
             return json.dumps({"ok": True, "action": "todo_remind_tick", "sent": total_sent})
 
-        # V8: 智能调度引擎（daily_init / scheduler_tick 遍历所有用户）
+        # V9: 智能调度引擎（daily_init / scheduler_tick 遍历所有用户）
         if action in ("daily_init", "scheduler_tick"):
             user_ids = [target_user] if target_user else get_all_active_users()
             results = []
@@ -1136,7 +1145,7 @@ def system_endpoint():
                         r = _scheduler_tick(uid, ctx)
                     results.append({"user_id": uid, **r})
                 except Exception as e:
-                    _log(f"[/system] V8 {action} 用户 {uid} 失败: {e}")
+                    _log(f"[/system] V9 {action} 用户 {uid} 失败: {e}")
                     results.append({"user_id": uid, "ok": False, "error": str(e)})
             return json.dumps({"ok": True, "action": action, "results": results}, ensure_ascii=False)
 
@@ -1175,9 +1184,10 @@ def system_endpoint():
 
 
 def _run_system_action_for_user(action, data, uid, ctx):
-    """为单个用户执行系统动作，返回结果 dict"""
+    """为单个用户执行系统动作，返回结果 dict（V9: 增加时间戳日志）"""
     from memory import read_state_cached, write_state_and_update_cache
-    _log(f"[system_action] 开始执行: action={action}, user={uid}")
+    scheduled_at = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    _log(f"[system_action] 开始执行: action={action}, user={uid}, scheduled_at={scheduled_at}")
     t0 = time.time()
 
     if action == "todo_remind":
@@ -1258,9 +1268,11 @@ def _run_system_action_for_user(action, data, uid, ctx):
         result = brain.process(payload, ctx=ctx)
         reply = result.get("reply") if result else None
         if reply:
-            _log(f"[system_action] {action}: 发送回复给 {uid}, len={len(reply)}")
+            delivered_at = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+            _log(f"[system_action] {action}: 发送回复给 {uid}, len={len(reply)}, delivered_at={delivered_at}")
             channel_router.send_message(uid, reply)
-        _log(f"[system_action] {action} 完成, user={uid}, has_reply={bool(reply)}, 耗时={time.time()-t0:.1f}s")
+        _log(f"[system_action] {action} 完成, user={uid}, has_reply={bool(reply)}, "
+             f"耗时={time.time()-t0:.1f}s, scheduled_at={scheduled_at}")
         return {"ok": True, "has_reply": bool(reply)}
 
     if action == "weekly_review":
@@ -1364,12 +1376,23 @@ def health_detail():
     except Exception:
         checks["disk_free_gb"] = -1
 
-    # 4. Scheduler 是否在运行
+    # 4. Cron 调度是否活跃（通过 cron 日志最后更新时间判断）
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-        # 简单检查：看有没有注册的 jobs
-        checks["scheduler"] = True  # 如果启动时未报错就认为 OK
-    except ImportError:
+        cron_log = "/var/log/textagent_cron.log"
+        if os.path.exists(cron_log):
+            last_mod = os.path.getmtime(cron_log)
+            age_seconds = int(time.time() - last_mod)
+            checks["cron_last_update_seconds_ago"] = age_seconds
+            # todo_remind_tick 每分钟执行，超过 5 分钟未更新说明 cron 可能停了
+            if age_seconds > 300:
+                checks["cron_warning"] = f"cron 日志 {age_seconds}s 未更新，请检查 crontab"
+                checks["scheduler"] = False
+            else:
+                checks["scheduler"] = True
+        else:
+            checks["scheduler"] = False
+            checks["cron_warning"] = "cron 日志文件不存在，crontab 可能未配置"
+    except Exception:
         checks["scheduler"] = False
 
     # 5. 活跃用户数
@@ -1861,21 +1884,15 @@ def _build_weather_context():
     return {}
 
 
-# ============ V8: 智能调度引擎 ============
+# ============ V9: 智能调度引擎（精确性改造） ============
 
 def _add_minutes(time_str, minutes):
-    """给 HH:MM 格式的时间加减分钟数，返回 HH:MM"""
-    try:
-        parts = time_str.split(":")
-        total = int(parts[0]) * 60 + int(parts[1]) + minutes
-        total = max(0, min(total, 1439))
-        return f"{total // 60:02d}:{total % 60:02d}"
-    except (ValueError, IndexError):
-        return time_str
+    """给 HH:MM 格式的时间加减分钟数，返回 HH:MM（V9: 委托 time_utils）"""
+    return _add_minutes_v9(time_str, minutes)
 
 
 def _generate_daily_intents(state):
-    """V8: 基于用户节奏画像动态生成当天触达意图队列"""
+    """V9: 基于用户节奏画像动态生成当天触达意图队列"""
     sched = state.get("scheduler", {})
     rhythm = sched.get("user_rhythm", {})
     now = datetime.now(BEIJING_TZ)
@@ -1935,13 +1952,13 @@ def _generate_daily_intents(state):
         },
     ]
 
-    _log(f"[V8] 生成每日意图: wake={wake_time}, sleep={sleep_time}, "
+    _log(f"[V9] 生成每日意图: wake={wake_time}, sleep={sleep_time}, "
          f"weekend={is_weekend}, intents={len(intents)}")
     return intents
 
 
 def _daily_init(uid, ctx):
-    """V8: 每日初始化（多用户版）— 生成当天意图队列 + 重置计数器"""
+    """V9: 每日初始化（多用户版）— 生成当天意图队列 + 重置计数器"""
     from memory import write_state_and_update_cache
     # 绕过缓存直接读文件，防止缓存中旧的 _init_date 导致重复初始化
     state = ctx.IO.read_json(ctx.state_file) or {}
@@ -1950,7 +1967,7 @@ def _daily_init(uid, ctx):
     today_str = now.strftime("%Y-%m-%d")
 
     if sched.get("_init_date") == today_str:
-        _log(f"[V8][{uid}] daily_init 今天已执行，跳过")
+        _log(f"[V9][{uid}] daily_init 今天已执行，跳过")
         return {"skipped": True, "date": today_str}
 
     # 额外防重复：仅当 _init_date 是今天时，检查意图队列是否已在执行中
@@ -1958,23 +1975,36 @@ def _daily_init(uid, ctx):
     existing_intents = sched.get("intents", [])
     old_init_date = sched.get("_init_date", "")
     if old_init_date == today_str and existing_intents and any(i.get("status") not in ("pending", None) for i in existing_intents):
-        _log(f"[V8][{uid}] daily_init 检测到已有执行中/已完成的意图队列，跳过覆盖")
+        _log(f"[V9][{uid}] daily_init 检测到已有执行中/已完成的意图队列，跳过覆盖")
         return {"skipped": True, "reason": "intents_already_active"}
 
     intents = _generate_daily_intents(state)
 
     # 过期意图标记 skipped（容器重启等场景）
+    # 【修复】对 morning_report 增加补发窗口：即使超过 latest，
+    # 在 latest+120min 内仍保留为 pending（允许延迟补发），避免晨报因服务延迟启动而永久跳过
     now_min = now.hour * 60 + now.minute
     for intent in intents:
         latest = intent.get("latest", "23:59")
-        try:
-            latest_min = int(latest.split(":")[0]) * 60 + int(latest.split(":")[1])
-        except (ValueError, IndexError):
+        latest_min = safe_parse_hhmm(latest, -1)
+        if latest_min < 0:
             continue
         if now_min > latest_min:
+            intent_type = intent.get("type", "")
+            # morning_report 和 daily_report 允许延迟补发窗口（120分钟）
+            if intent_type in ("morning_report", "daily_report"):
+                grace_min = latest_min + 120
+                if now_min <= grace_min:
+                    # 在补发窗口内：调整 latest 为当前时间+5分钟，让下一个 tick 立即触发
+                    new_latest = format_minutes(now_min + 5)
+                    intent["latest"] = new_latest
+                    intent["ideal"] = now.strftime("%H:%M")  # 立即可触发
+                    intent["_trigger_reason"] = f"延迟补发（原 latest={latest}, 现={new_latest}）"
+                    _log(f"[V9][{uid}] 意图 {intent_type} 延迟补发: latest {latest} → {new_latest}")
+                    continue  # 保持 pending 状态
             intent["status"] = "skipped"
             intent["_skip_reason"] = f"初始化时已过期（now={now.strftime('%H:%M')} > latest={latest}）"
-            _log(f"[V8][{uid}] 意图 {intent['type']} 已过期，标记 skipped")
+            _log(f"[V9][{uid}] 意图 {intent['type']} 已过期，标记 skipped")
 
     sched["intents"] = intents
     sched["_init_date"] = today_str
@@ -1984,52 +2014,105 @@ def _daily_init(uid, ctx):
     state["scheduler"] = sched
     write_state_and_update_cache(state, ctx)
 
-    _log(f"[V8][{uid}] daily_init 完成: {len(intents)} 个意图已生成")
+    _log(f"[V9][{uid}] daily_init 完成: {len(intents)} 个意图已生成")
     return {"date": today_str, "intents_count": len(intents)}
 
 
+def _check_push_limits(sched, now_min):
+    """V9: 检查推送限制（每日上限 + 最小间隔）
+
+    Returns:
+        (can_push: bool, reason: str or None)
+    """
+    push_count = sched.get("_push_count_today", 0)
+    if push_count >= SCHEDULER_PUSH_MAX_DAILY:
+        return False, "daily_limit"
+
+    last_push = sched.get("_last_push_time")
+    if last_push:
+        last_min = safe_parse_hhmm(last_push, -1)
+        if last_min >= 0 and now_min - last_min < SCHEDULER_MIN_PUSH_GAP:
+            return False, "min_gap"
+
+    return True, None
+
+
+def _revive_skipped_intents(intents, now_min, now, uid):
+    """V9: 对 skipped 的 morning_report/daily_report 做二次补发
+
+    场景：daily_init 在超过 120 分钟宽限窗口后才执行（如服务器中午重启），
+    导致 morning_report 被标记为 skipped。这里在 tick 中做二次补救：
+    如果 latest+180min 内且今天从未推送过该类型，重置为 pending。
+    """
+    for intent in intents:
+        if intent.get("status") != "skipped":
+            continue
+        intent_type = intent.get("type", "")
+        if intent_type not in ("morning_report", "daily_report"):
+            continue
+        # 检查是否已推送过（sent 状态说明已成功执行）
+        if any(i.get("type") == intent_type and i.get("status") == "sent" for i in intents):
+            continue
+        # 计算 latest 的宽限边界（latest + 180 分钟）
+        original_latest = intent.get("_original_latest") or intent.get("latest", "23:59")
+        lat_min = safe_parse_hhmm(original_latest, -1)
+        if lat_min < 0:
+            continue
+        grace_deadline = lat_min + 180  # 3 小时宽限
+        if now_min <= grace_deadline:
+            # 重置为 pending，调整时间窗口让 _rule_evaluate 立即放行
+            intent["status"] = "pending"
+            intent["_original_latest"] = original_latest
+            intent["latest"] = format_minutes(now_min + 5)
+            intent["ideal"] = now.strftime("%H:%M")
+            intent["_trigger_reason"] = f"tick 二次补发（原 skipped, latest={original_latest}）"
+            _log(f"[V9][{uid}] {intent_type} 被补发: skipped → pending (grace_deadline={grace_deadline}min)")
+
+
 def _scheduler_tick(uid, ctx):
-    """V8: 每 30 分钟心跳（多用户版）— 检查到期意图并执行"""
+    """V9: 每 5 分钟心跳（多用户版）— 检查到期意图并执行
+
+    V9 改进：
+    - 心跳从 30 分钟缩短到 5 分钟，大幅降低推送延迟
+    - 时间计算统一使用 time_utils
+    - 拆分 _check_push_limits / _revive_skipped_intents 职责更清晰
+    - 消除 _execute_intent 的 HTTP 回环，直接函数调用
+    """
     from memory import write_state_and_update_cache
     # 绕过缓存读最新 state，防止缓存中旧的意图状态导致重复执行
     state = ctx.IO.read_json(ctx.state_file) or {}
     sched = state.setdefault("scheduler", {})
     now = datetime.now(BEIJING_TZ)
     now_str = now.strftime("%H:%M")
+    now_full = now.strftime("%Y-%m-%d %H:%M:%S")
     today_str = now.strftime("%Y-%m-%d")
 
     # 兜底初始化
     if sched.get("_init_date") != today_str:
-        _log(f"[V8][{uid}] tick 检测到未初始化，触发 daily_init")
+        _log(f"[V9][{uid}] tick 检测到未初始化，触发 daily_init")
         _daily_init(uid, ctx)
         # 重新读取（daily_init 已写入文件）
         state = ctx.IO.read_json(ctx.state_file) or {}
         sched = state.get("scheduler", {})
 
     intents = sched.get("intents", [])
+    now_min = now.hour * 60 + now.minute
+
+    # 二次补发 skipped 的重要意图
+    _revive_skipped_intents(intents, now_min, now, uid)
+
     pending = [i for i in intents if i.get("status") == "pending"]
 
     if not pending:
-        _log(f"[V8][{uid}] tick: 无 pending 意图")
         return {"evaluated": 0, "executed": 0}
 
-    push_count = sched.get("_push_count_today", 0)
-    if push_count >= SCHEDULER_PUSH_MAX_DAILY:
-        _log(f"[V8][{uid}] tick: 今日推送已达上限 {push_count}/{SCHEDULER_PUSH_MAX_DAILY}")
-        return {"evaluated": len(pending), "executed": 0, "reason": "daily_limit"}
+    # 检查推送限制
+    can_push, limit_reason = _check_push_limits(sched, now_min)
+    if not can_push:
+        _log(f"[V9][{uid}] tick: 推送受限 ({limit_reason})")
+        return {"evaluated": len(pending), "executed": 0, "reason": limit_reason}
 
-    last_push = sched.get("_last_push_time")
-    if last_push:
-        try:
-            last_parts = last_push.split(":")
-            last_min = int(last_parts[0]) * 60 + int(last_parts[1])
-            now_min = now.hour * 60 + now.minute
-            if now_min - last_min < SCHEDULER_MIN_PUSH_GAP:
-                _log(f"[V8][{uid}] tick: 距上次推送不足 {SCHEDULER_MIN_PUSH_GAP} 分钟，跳过")
-                return {"evaluated": len(pending), "executed": 0, "reason": "min_gap"}
-        except (ValueError, IndexError):
-            pass
-
+    # 规则评估
     ready = []
     for intent in pending:
         action = _rule_evaluate(intent, state, now)
@@ -2041,23 +2124,25 @@ def _scheduler_tick(uid, ctx):
 
     if not ready:
         write_state_and_update_cache(state, ctx)
-        _log(f"[V8][{uid}] tick: 评估 {len(pending)} 个意图，无需执行")
         return {"evaluated": len(pending), "executed": 0}
 
     if len(ready) > 1:
         ready = _try_merge_intents(ready)
 
+    # 执行到期意图
+    push_count = sched.get("_push_count_today", 0)
     executed = 0
     for intent in ready:
         if push_count + executed >= SCHEDULER_PUSH_MAX_DAILY:
             break
         try:
-            _execute_intent(intent, uid)
+            intent["_tick_at"] = now_full  # P1-改造6: 记录 tick 评估时间
+            _execute_intent(intent, uid, ctx=ctx)
             intent["status"] = "sent"
             intent["_sent_at"] = now_str
             executed += 1
         except Exception as e:
-            _log(f"[V8][{uid}] 意图执行失败 {intent['type']}: {e}")
+            _log(f"[V9][{uid}] 意图执行失败 {intent['type']}: {e}")
             intent["_error"] = str(e)
 
     sched["_push_count_today"] = push_count + executed
@@ -2074,12 +2159,15 @@ def _scheduler_tick(uid, ctx):
         write_state_and_update_cache(fresh_state, ctx)
     else:
         write_state_and_update_cache(state, ctx)
-    _log(f"[V8][{uid}] tick 完成: 评估 {len(pending)}, 执行 {executed}")
+    _log(f"[V9][{uid}] tick 完成: 评估 {len(pending)}, 执行 {executed}")
     return {"evaluated": len(pending), "executed": executed}
 
 
 def _rule_evaluate(intent, state, now):
-    """V8 Layer 1: 规则引擎 — 返回 "send" | "skip" | "wait" """
+    """V9 Layer 1: 规则引擎 — 返回 "send" | "skip" | "wait"
+
+    V9: 使用 safe_parse_hhmm 替代散落的 split(":") 时间解析。
+    """
     intent_type = intent.get("type", "")
     now_min = now.hour * 60 + now.minute
 
@@ -2087,14 +2175,12 @@ def _rule_evaluate(intent, state, now):
     latest = intent.get("latest", "23:59")
     ideal = intent.get("ideal")
 
-    try:
-        earliest_min = int(earliest.split(":")[0]) * 60 + int(earliest.split(":")[1])
-        latest_min = int(latest.split(":")[0]) * 60 + int(latest.split(":")[1])
-        ideal_min = None
-        if ideal:
-            ideal_min = int(ideal.split(":")[0]) * 60 + int(ideal.split(":")[1])
-    except (ValueError, IndexError):
-        return "wait"
+    earliest_min = safe_parse_hhmm(earliest, -1)
+    latest_min = safe_parse_hhmm(latest, 1440)
+    ideal_min = safe_parse_hhmm(ideal, -1) if ideal else -1
+
+    if earliest_min < 0:
+        return "wait"  # 时间格式异常，不触发
 
     if now_min < earliest_min:
         return "wait"
@@ -2106,12 +2192,9 @@ def _rule_evaluate(intent, state, now):
     sched = state.get("scheduler", {})
     rhythm = sched.get("user_rhythm", {})
     avg_wake = rhythm.get("avg_wake_time", SCHEDULER_DEFAULT_WAKE)
-    try:
-        wake_min = int(avg_wake.split(":")[0]) * 60 + int(avg_wake.split(":")[1])
-        if now_min < wake_min:
-            return "wait"
-    except (ValueError, IndexError):
-        pass
+    wake_min = safe_parse_hhmm(avg_wake, 0)
+    if now_min < wake_min:
+        return "wait"
 
     if intent_type in ("companion", "nudge_check"):
         nudge = state.get("nudge_state", {})
@@ -2144,11 +2227,11 @@ def _rule_evaluate(intent, state, now):
     if max_times and intent.get("sent_count", 0) >= max_times:
         return "skip"
 
-    if ideal_min and now_min >= ideal_min:
+    if ideal_min >= 0 and now_min >= ideal_min:
         intent["_trigger_reason"] = "到达 ideal 时间"
         return "send"
 
-    if not ideal_min:
+    if ideal_min < 0:
         if intent_type == "companion":
             intent["_trigger_reason"] = "沉默条件满足"
             return "send"
@@ -2164,7 +2247,7 @@ _MERGEABLE = {
 
 
 def _try_merge_intents(intents):
-    """V8: 尝试合并相近的意图"""
+    """V9: 尝试合并相近的意图"""
     types = set(i["type"] for i in intents)
     consumed = set()
     for pair in _MERGEABLE:
@@ -2175,16 +2258,24 @@ def _try_merge_intents(intents):
     for intent in intents:
         if intent["type"] in consumed:
             intent["status"] = "merged"
-            _log(f"[V8] 意图合并: {intent['type']} 被合并")
+            _log(f"[V9] 意图合并: {intent['type']} 被合并")
         else:
             merged.append(intent)
     return merged
 
 
-def _execute_intent(intent, user_id=None):
-    """V8: 分发执行一个到期意图 — 通过 /system 端点"""
+def _execute_intent(intent, user_id=None, ctx=None):
+    """V9: 分发执行一个到期意图 — 直接函数调用（消除 HTTP 回环）
+
+    V8 中通过 POST /system 回调自己，导致：
+    1. 一个 tick 占用两个 Flask 线程（排队阻塞风险）
+    2. HTTP 往返额外延迟 + timeout 风险
+    V9 改为直接调用 _run_system_action_for_user()，省去一次 HTTP 回环。
+    """
     intent_type = intent.get("type", "")
-    _log(f"[V8] 执行意图: {intent_type}, user={user_id}, reason={intent.get('_trigger_reason', 'N/A')}")
+    scheduled_at = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    _log(f"[V9] 执行意图: {intent_type}, user={user_id}, "
+         f"reason={intent.get('_trigger_reason', 'N/A')}, scheduled_at={scheduled_at}")
 
     action_map = {
         "morning_report": "morning_report",
@@ -2197,87 +2288,78 @@ def _execute_intent(intent, user_id=None):
 
     action = action_map.get(intent_type)
     if not action:
-        _log(f"[V8] 未知意图类型: {intent_type}")
+        _log(f"[V9] 未知意图类型: {intent_type}")
         return
 
     try:
-        payload = {"action": action}
-        if user_id:
-            payload["user_id"] = user_id
-        requests.post(
-            f"http://127.0.0.1:{SERVER_PORT}/system",
-            json=payload,
-            timeout=120
-        )
+        # V9: 直接函数调用，不再通过 HTTP 回环
+        if ctx and user_id:
+            result = _run_system_action_for_user(action, {}, user_id, ctx)
+            delivered_at = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+            intent["_scheduled_at"] = scheduled_at
+            intent["_delivered_at"] = delivered_at
+            _log(f"[V9] 意图执行完成 {intent_type}: user={user_id}, "
+                 f"result={result}, delivered_at={delivered_at}")
+        else:
+            # 降级：无 ctx 时仍走 HTTP（兼容旧调用路径）
+            _log(f"[V9] 降级: {intent_type} 无 ctx, 回退 HTTP 调用")
+            payload = {"action": action}
+            if user_id:
+                payload["user_id"] = user_id
+            requests.post(
+                f"http://127.0.0.1:{SERVER_PORT}/system",
+                json=payload,
+                timeout=120
+            )
     except Exception as e:
-        _log(f"[V8] 意图执行失败 {intent_type}: {e}")
+        _log(f"[V9] 意图执行失败 {intent_type}: {e}")
         raise
 
 
-# ============ V8: APScheduler 内嵌定时调度（心跳驱动） ============
+# ============ 启动兜底：首次 daily_init（去重 + 延迟） ============
 
-def _setup_builtin_scheduler():
-    """V8: 内嵌定时调度器 — 心跳驱动 + 少量固定任务
+# 标记文件路径（每天只执行一次启动兜底 daily_init）
+_DAILY_INIT_MARKER = os.path.join(
+    os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data")),
+    "_textagent_system", ".daily_init_marker"
+)
 
-    改前（10 个独立 cron）→ 改后（4 个固定 + 1 心跳 + 1 每日初始化）：
-    - 保留：refresh_cache / mood_generate / periodic_tasks(含 weekly/monthly)
-    - 新增：scheduler_tick（每 30 分钟心跳评估）/ daily_init（05:00 生成意图队列）
-    - 移除：morning_report / todo_remind / nudge_check / companion_check / evening_checkin / daily_report
-            → 全部由 scheduler_tick 智能驱动
+
+def _startup_daily_init():
+    """启动时兜底触发一次 daily_init（带去重 + 延迟）
+
+    去重逻辑：用 marker 文件记录上次执行日期，同一天内重启不重复执行。
+    延迟逻辑：等待 15 秒让 Flask 完全就绪后再触发。
     """
-    if os.environ.get("SCF_RUNTIME") or os.environ.get("TENCENTCLOUD_RUNENV"):
-        _log("[Scheduler] 检测到 SCF 环境，跳过内置调度器")
-        return
+    time.sleep(15)  # 等 Flask 就绪
 
+    # ── 去重：检查今天是否已执行过 ──
+    today_str = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-    except ImportError:
-        _log("[Scheduler] 未安装 apscheduler，跳过内置调度器。如需定时任务请: pip install apscheduler")
-        return
+        if os.path.exists(_DAILY_INIT_MARKER):
+            with open(_DAILY_INIT_MARKER, "r") as f:
+                last_date = f.read().strip()
+            if last_date == today_str:
+                _log(f"[Startup] daily_init 今天已执行过({last_date})，跳过")
+                return
+    except Exception:
+        pass  # marker 读取失败不影响执行
 
-    scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
-
-    def _fire_system_action(action):
-        """通过 HTTP 调用自身 /system 端点（不传 user_id，遍历所有活跃用户）"""
-        try:
-            url = f"http://127.0.0.1:{SERVER_PORT}/system"
-            resp = requests.post(url, json={"action": action}, timeout=600)
-            if resp.status_code != 200:
-                _log(f"[Scheduler] {action} 异常: HTTP {resp.status_code}")
-        except Exception as e:
-            _log(f"[Scheduler] {action} 失败: {e}")
-
-    jobs = [
-        # 保留：不依赖用户节奏的固定任务
-        ("refresh_cache",   {"trigger": "interval", "minutes": 30}),
-        ("weekly_review",   {"trigger": "cron", "day_of_week": "mon", "hour": 9, "minute": 0}),
-        ("monthly_review",  {"trigger": "cron", "day": 1, "hour": 9, "minute": 0}),
-        ("finance_monthly_report", {"trigger": "cron", "day": 8, "hour": 20, "minute": 0}),
-
-        # 待办提醒：每 1 分钟检查一次到期待办（独立于 scheduler_tick）
-        ("todo_remind_tick", {"trigger": "interval", "minutes": 1}),
-
-        # V8 新增：智能调度心跳（驱动其他意图：早报、晚安、陪伴等）
-        ("scheduler_tick",  {"trigger": "interval", "minutes": SCHEDULER_TICK_MINUTES}),
-
-        # V8 新增：每日意图初始化
-        ("daily_init",      {"trigger": "cron", "hour": 5, "minute": 0}),
-    ]
-
-    for action, kwargs in jobs:
-        scheduler.add_job(
-            _fire_system_action, args=[action],
-            id=action, max_instances=1,
-            misfire_grace_time=300,
-            **kwargs
-        )
-
-    scheduler.start()
-    _log(f"[Scheduler][V8] 已启动 {len(jobs)} 个任务 "
-         f"(待办心跳=1min, 调度心跳={SCHEDULER_TICK_MINUTES}min, 固定=5, 每日初始化=05:00)")
-
-    # 启动时兜底触发一次 daily_init
-    threading.Thread(target=lambda: _fire_system_action("daily_init"), daemon=True).start()
+    # ── 执行 daily_init ──
+    try:
+        _log("[Startup] 兜底触发 daily_init ...")
+        url = f"http://127.0.0.1:{SERVER_PORT}/system"
+        resp = requests.post(url, json={"action": "daily_init"}, timeout=600)
+        if resp.status_code == 200:
+            _log("[Startup] daily_init 兜底执行成功")
+            # 写入 marker
+            os.makedirs(os.path.dirname(_DAILY_INIT_MARKER), exist_ok=True)
+            with open(_DAILY_INIT_MARKER, "w") as f:
+                f.write(today_str)
+        else:
+            _log(f"[Startup] daily_init 兜底异常: HTTP {resp.status_code}")
+    except Exception as e:
+        _log(f"[Startup] daily_init 兜底失败: {e}")
 
 
 # ============ 启动初始化 ============
@@ -2288,23 +2370,43 @@ def _init_system_dirs():
     _log(f"[Init] 系统目录已就绪: {SYSTEM_DIR}")
 
 
-if __name__ == '__main__':
+_app_initialized = False  # 防止 gunicorn 多 worker fork 时重复初始化
+
+def _do_init():
+    """执行一次性启动初始化（渠道注册、兜底 daily_init 等）"""
+    global _app_initialized
+    if _app_initialized:
+        return
+    _app_initialized = True
+
     _init_system_dirs()
 
-    # ============ 渠道注册 ============
+    # ── 渠道注册 ──
     _log(f"[Init] 渠道: wework")
-
-    # 企微渠道
     channel_router.register_channel("wework", send_wework_message)
-
-    # ============ 同步自定义菜单（暂时禁用）============
-    # def _sync_menu_on_startup():
-    #     """启动后延迟 3 秒同步菜单，避免阻塞主线程"""
-    #     time.sleep(3)
-    #     _log("[Init] 开始同步企微自定义菜单...")
-    #     create_wework_menu()
-    # threading.Thread(target=_sync_menu_on_startup, daemon=True).start()
     _log("[Init] 自定义菜单同步已禁用")
 
-    _setup_builtin_scheduler()
+    # ── 兜底 daily_init（异步，带去重+延迟）──
+    threading.Thread(target=_startup_daily_init, daemon=True).start()
+    _log("[Init] 调度模式: ECS crontab 外部驱动（已移除 APScheduler）")
+
+
+def create_app():
+    """Flask 应用工厂 — 供 gunicorn 调用。
+
+    用法:
+        gunicorn "app:create_app()"
+        # 或
+        gunicorn --factory app:create_app
+
+    注意: 由于当前架构大量使用模块级全局变量（_msg_cache, _wework_token 等），
+    app 对象在模块加载时已创建。此函数仅负责触发初始化逻辑并返回已有的 app。
+    Phase 3 模块化拆分后将改为真正的工厂模式。
+    """
+    _do_init()
+    return app
+
+
+if __name__ == '__main__':
+    _do_init()
     app.run(host='0.0.0.0', port=SERVER_PORT, threaded=True)

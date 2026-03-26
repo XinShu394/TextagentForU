@@ -124,6 +124,26 @@ _MONTHLY_BUDGET = float(os.environ.get("MONTHLY_BUDGET", "50"))
 def _check_monthly_budget():
     """检查当月 API 成本是否超过预算的 80%，超过则推企微告警"""
     try:
+        # ── SQLite 路径 ──
+        try:
+            from db import usage_logs as _db_usage_logs
+        except ImportError:
+            _db_usage_logs = None
+
+        if _db_usage_logs is not None:
+            month_cost = _db_usage_logs.get_monthly_cost()
+            pct = month_cost / _MONTHLY_BUDGET * 100 if _MONTHLY_BUDGET > 0 else 0
+            if pct >= 80:
+                now = datetime.now(timezone(timedelta(hours=8)))
+                month_str = now.strftime("%Y-%m")
+                _send_admin_alert("budget_warning",
+                    f"💰 月度预算预警\n\n"
+                    f"当月已用: ¥{month_cost:.2f} / ¥{_MONTHLY_BUDGET:.0f}\n"
+                    f"使用率: {pct:.0f}%\n"
+                    f"月份: {month_str}")
+            return
+
+        # ── JSON 文件回退路径 ──
         from user_context import USAGE_LOG_FILE
         import os as _os
 
@@ -176,11 +196,31 @@ def _set_current_user(user_id):
 
 
 def _log_llm_usage(model_tier, model_name, usage_dict, latency_s):
-    """记录一次 LLM 调用的用量到 usage_log.jsonl，支持自动轮转"""
+    """记录一次 LLM 调用的用量到 SQLite 或 usage_log.jsonl，支持自动轮转"""
     try:
-        from user_context import USAGE_LOG_FILE, SYSTEM_DIR
+        # ── SQLite 路径 ──
+        try:
+            from db import usage_logs as _db_usage_logs
+        except ImportError:
+            _db_usage_logs = None
 
         user_id = getattr(_thread_local, "user_id", "unknown")
+
+        if _db_usage_logs is not None:
+            _db_usage_logs.log_usage(
+                user_id=user_id,
+                model_tier=model_tier,
+                model=model_name,
+                prompt_tokens=usage_dict.get("prompt_tokens", 0),
+                completion_tokens=usage_dict.get("completion_tokens", 0),
+                total_tokens=usage_dict.get("total_tokens", 0),
+                latency_s=latency_s,
+            )
+            return
+
+        # ── JSON 文件回退路径 ──
+        from user_context import USAGE_LOG_FILE, SYSTEM_DIR
+
         now = datetime.now(timezone(timedelta(hours=8)))
 
         entry = {
@@ -969,7 +1009,7 @@ def _write_memory(memory_updates, ctx):
 
 
 def _write_decision_log(payload, decision, reply, elapsed, ctx):
-    """将每次决策写入 JSONL 日志（追加模式）
+    """将每次决策写入 SQLite 或 JSONL 日志
     V12 隐私保护：不记录用户输入原文、thinking 原文、回复原文。
     只保留技术性字段供运维排障。
     """
@@ -978,38 +1018,61 @@ def _write_decision_log(payload, decision, reply, elapsed, ctx):
         now_str = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M:%S")
 
         input_type = payload.get("type", "") if payload else ""
-        # system action 记录 action 名称（非用户隐私）
         action = payload.get("action", "") if input_type == "system" else ""
+        skill = decision.get("skill", "") if decision else ""
+        has_memory = bool(decision.get("memory_updates")) if decision else False
+        has_rpl = bool(reply)
+        elapsed_s = round(elapsed, 1) if elapsed else None
+        user_id = ctx.user_id if ctx else ""
 
-        entry = {
-            "ts": now_str,
-            "user_id": ctx.user_id if ctx else "",
-            "input_type": input_type,
-            "action": action,
-            "skill": decision.get("skill", "") if decision else "",
-            "has_memory_updates": bool(decision.get("memory_updates")) if decision else False,
-            "has_reply": bool(reply),
-            "elapsed_s": round(elapsed, 1) if elapsed else None,
-        }
         # 注入 Request ID（如果有）
+        request_id = ""
         try:
             from app import _get_request_id
             rid = _get_request_id()
             if rid:
-                entry["request_id"] = rid
+                request_id = rid
         except ImportError:
             pass
+
+        # ── SQLite 路径 ──
+        try:
+            from db import decision_logs as _db_decision_logs
+        except ImportError:
+            _db_decision_logs = None
+
+        if _db_decision_logs is not None:
+            _db_decision_logs.write_decision_log(
+                user_id=user_id, ts=now_str, input_type=input_type,
+                action=action, skill=skill,
+                has_memory_updates=has_memory, has_reply=has_rpl,
+                elapsed_s=elapsed_s, request_id=request_id)
+            _log(f"[Brain] 决策日志已写入(SQLite): skill={skill}")
+            return
+
+        # ── JSONL 文件回退路径 ──
+        entry = {
+            "ts": now_str,
+            "user_id": user_id,
+            "input_type": input_type,
+            "action": action,
+            "skill": skill,
+            "has_memory_updates": has_memory,
+            "has_reply": has_rpl,
+            "elapsed_s": elapsed_s,
+        }
+        if request_id:
+            entry["request_id"] = request_id
         line = json.dumps(entry, ensure_ascii=False)
 
         log_file = ctx.decision_log_file if ctx else ""
         if log_file and ctx:
-            # 本地存储才做轮转检查（OneDrive 不支持 rename）
             if ctx.storage_mode == "local":
                 _rotate_jsonl(log_file, max_size_mb=5)
             existing = ctx.IO.read_text(log_file) or ""
             new_content = existing + line + "\n"
             ctx.IO.write_text(log_file, new_content)
-        _log(f"[Brain] 决策日志已写入: skill={entry['skill']}")
+        _log(f"[Brain] 决策日志已写入: skill={skill}")
     except Exception as e:
         _log(f"[Brain] 决策日志写入失败（不影响主流程）: {e}")
 

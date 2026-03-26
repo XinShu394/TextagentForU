@@ -468,6 +468,27 @@ def add(params, state, ctx):
     if recur and "start_date" not in recur_spec:
         recur_spec["start_date"] = _now_str()
 
+    # ── 【兜底】一次性待办 remind_at 格式校验 ──
+    # 如果 recur 为空（一次性）但 remind_at 只有 HH:MM（纯时间，无日期），
+    # 自动补全为 YYYY-MM-DD HH:MM，防止落入"两不管"缝隙
+    if remind_at and not recur and len(remind_at) <= 5:
+        # 纯 HH:MM 格式，需要补上日期
+        now = _now()
+        today_str = now.strftime("%Y-%m-%d")
+        try:
+            h, m = remind_at.split(":")
+            remind_dt = now.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+            if remind_dt <= now:
+                # 时间已过，推到明天
+                remind_dt += timedelta(days=1)
+                date_str = remind_dt.strftime("%Y-%m-%d")
+            else:
+                date_str = today_str
+            remind_at = f"{date_str} {remind_at}"
+            _log(f"[todo.add] 格式兜底: 一次性待办 remind_at 补全为 {remind_at}")
+        except (ValueError, TypeError):
+            _log(f"[todo.add] 格式兜底失败: remind_at={remind_at}")
+
     todo = {
         "id": _next_id(),
         "content": content,
@@ -478,6 +499,8 @@ def add(params, state, ctx):
         "recur_spec": recur_spec,
         "last_notified": "",
         "last_completed": "",
+        # 记录创建时间戳（含分钟），防止 todo_remind_tick 在创建后立即触发预提醒
+        "created_at": _now().strftime("%Y-%m-%d %H:%M"),
     }
 
     todos = state.get("todos", [])
@@ -798,30 +821,85 @@ def check_todos(state, ctx=None, todo_file=None):
                 changed = True
             continue
 
+        # ── 【运行时兜底】一次性待办 remind_at 格式修复 ──
+        # 如果 recur 为空但 remind_at 是纯 HH:MM（可能是旧数据或 LLM 格式错误），
+        # 尝试补全为 YYYY-MM-DD HH:MM，让后续逻辑正常处理
+        if remind_at and not recur and len(remind_at) <= 5:
+            try:
+                h, m = remind_at.split(":")
+                remind_dt = now.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+                # 判断这个时间是今天还是昨天的
+                created_date = t.get("created", today_str)
+                if created_date < today_str:
+                    # 创建日期早于今天，说明是过去的待办，用创建日期
+                    new_remind_at = f"{created_date} {remind_at}"
+                elif remind_dt <= now:
+                    # 今天创建但时间已过，用今天日期（后续会被过期清理）
+                    new_remind_at = f"{today_str} {remind_at}"
+                else:
+                    # 时间未到，用今天日期
+                    new_remind_at = f"{today_str} {remind_at}"
+                _log(f"[todo.check] 格式修复: \"{content}\" remind_at {remind_at} → {new_remind_at}")
+                t["remind_at"] = new_remind_at
+                remind_at = new_remind_at
+                changed = True
+            except (ValueError, TypeError):
+                _log(f"[todo.check] 格式修复失败: \"{content}\" remind_at={remind_at}")
+
         # ── 一次性定时提醒 ──
         if remind_at and len(remind_at) > 5:
             if t.get("last_notified"):
                 _log(f"[todo.check] 跳过(已推送): \"{content}\" last_notified={t['last_notified']}")
-                continue  # 已推送过
+                continue  # 正式提醒已推送过，不再触发
             try:
                 remind_time = datetime.strptime(remind_at, "%Y-%m-%d %H:%M")
                 remind_time = remind_time.replace(tzinfo=BEIJING_TZ)
                 diff_minutes = (remind_time - now).total_seconds() / 60
                 _log(f"[todo.check] 一次性提醒: \"{content}\" remind_at={remind_at}, now={now.strftime('%Y-%m-%d %H:%M:%S')}, diff={diff_minutes:.1f}min, pre_notified={t.get('pre_notified', '')}")
-                if diff_minutes <= 2:
-                    # 【优化】容差 2 分钟：向后宽容，到期时间前 2 分钟到到期后均触发
-                    # 配合 last_notified 防重复，保证只推一次，即使心跳略有延迟也不错过
+
+                # 【修复】创建冷却期：刚添加的待办 2 分钟内不触发预提醒，
+                # 避免用户说"5:50提醒我"后系统立刻推一条"6分钟后：xxx"
+                created_at = t.get("created_at", "")
+                cooldown_active = False
+                if created_at:
+                    try:
+                        created_dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M")
+                        created_dt = created_dt.replace(tzinfo=BEIJING_TZ)
+                        since_created = (now - created_dt).total_seconds() / 60
+                        if since_created < 2:
+                            cooldown_active = True
+                            _log(f"[todo.check] 创建冷却期: 创建于 {created_at}, 仅 {since_created:.1f}min 前")
+                    except ValueError:
+                        pass
+
+                # ── 正式提醒：到期时间前 1 分钟 ~ 到期后（diff <= 1）──
+                # 这是最重要的提醒，优先级最高，不受冷却期限制
+                if diff_minutes <= 1:
                     messages.append(f"⏰ 提醒：{content}")
                     t["last_notified"] = today_str
                     changed = True
-                    _log(f"[todo.check] → 触发正式提醒 ✓")
-                elif diff_minutes <= 30 and not t.get("pre_notified"):
+                    _log(f"[todo.check] → 触发正式提醒 ✓ (diff={diff_minutes:.1f}min)")
+
+                # ── 容差触发：到期前 1~3 分钟 ──
+                # 比正式提醒稍宽（配合 1 分钟心跳间隔），不受冷却期限制
+                elif diff_minutes <= 3 and not cooldown_active:
+                    messages.append(f"⏰ 提醒：{content}")
+                    t["last_notified"] = today_str
+                    changed = True
+                    _log(f"[todo.check] → 容差触发正式提醒 ✓ (diff={diff_minutes:.1f}min)")
+
+                # ── 预提醒：到期前 3~30 分钟 ──
+                # 受冷却期限制 + pre_notified 防重复
+                elif diff_minutes <= 30 and not t.get("pre_notified") and not cooldown_active:
                     messages.append(f"⏰ {int(diff_minutes)} 分钟后：{content}")
                     t["pre_notified"] = today_str
                     changed = True
                     _log(f"[todo.check] → 触发预提醒 ({int(diff_minutes)}min)")
                 else:
-                    _log(f"[todo.check] → 未到期，跳过")
+                    if cooldown_active:
+                        _log(f"[todo.check] → 冷却期内，等待下次心跳")
+                    else:
+                        _log(f"[todo.check] → 未到期，跳过")
             except ValueError as e:
                 _log(f"[todo.check] 解析 remind_at 失败: \"{content}\" remind_at={remind_at} error={e}")
             continue
@@ -864,6 +942,7 @@ def check_todos(state, ctx=None, todo_file=None):
             # 检查是否过期需要自动标注完成
             is_expired = False
             expire_date = ""
+            minutes_past_expire = 0
             
             # 优先检查 remind_at（一次性提醒）
             if remind_at and len(remind_at) > 5:
@@ -873,17 +952,26 @@ def check_todos(state, ctx=None, todo_file=None):
                     if now > remind_time:
                         is_expired = True
                         expire_date = remind_at[:10]
+                        minutes_past_expire = (now - remind_time).total_seconds() / 60
                 except ValueError:
                     pass
             # 其次检查 due_date（截止日期）
             elif due_date and due_date < today_str:
                 is_expired = True
                 expire_date = due_date
+                minutes_past_expire = 999  # 截止日期过期无需精确到分钟
             
             if is_expired and notified:
-                # 已通知过且已过期 → 自动标注为完成
+                # 【修复】一次性提醒过期后，至少保留 60 分钟再自动完成
+                # 防止提醒刚触发（5:50），下一分钟（5:51）就把待办删了
+                if minutes_past_expire < 60:
+                    _log(f"[todo.check] 过期但在保留期内({minutes_past_expire:.0f}min < 60min): {t['content']}")
+                    cleaned.append(t)
+                    continue
+                
+                # 已通知过且已过期超过 60 分钟 → 自动标注为完成
                 auto_completed.append(t)
-                _log(f"[todo.check] 自动标注完成（过期）: {t['content']}")
+                _log(f"[todo.check] 自动标注完成（已推送,过期{minutes_past_expire:.0f}min）: {t['content']}")
                 
                 # 从 doing_items 移到 done_items
                 for i, item in enumerate(doing_items):
@@ -892,6 +980,23 @@ def check_todos(state, ctx=None, todo_file=None):
                         done_line = popped["raw"].replace("- [ ]", "- [x]")
                         if f"`{today_str}`" not in done_line:
                             done_line += f" ✅ `{today_str}` (自动完成)"
+                        done_items.insert(0, {"raw": done_line, "content": popped["content"], "date": today_str})
+                        todo_md_updated = True
+                        break
+                continue  # 不保留在 todos 中
+            
+            # 【修复】僵尸待办清理：如果过期但从未被推送过（notified 为空），
+            # 说明提醒从未触发（可能是之前的格式 bug 导致），也应该自动完成
+            if is_expired and not notified and minutes_past_expire >= 120:
+                auto_completed.append(t)
+                _log(f"[todo.check] 清理僵尸待办（未推送,过期{minutes_past_expire:.0f}min）: {t['content']}")
+                
+                for i, item in enumerate(doing_items):
+                    if t["content"].lower() in item["content"].lower() or item["content"].lower() in t["content"].lower():
+                        popped = doing_items.pop(i)
+                        done_line = popped["raw"].replace("- [ ]", "- [x]")
+                        if f"`{today_str}`" not in done_line:
+                            done_line += f" ✅ `{today_str}` (过期自动完成)"
                         done_items.insert(0, {"raw": done_line, "content": popped["content"], "date": today_str})
                         todo_md_updated = True
                         break

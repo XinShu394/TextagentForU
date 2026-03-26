@@ -1,10 +1,30 @@
-flask
-requests
-pycryptodome
-cryptography
-tencentcloud-sdk-python-asr
-beautifulsoup4
-apscheduler
-python-dotenv
-cnlunar
-openpyxl
+# ============ TextAgentForU 依赖清单 ============
+# 版本已锁定，避免隐式升级导致兼容问题
+# 更新时请先在测试环境验证，再修改此文件
+
+# --- Web 框架 ---
+flask==3.1.0
+gunicorn==23.0.0         # 生产级 WSGI 服务器（替代 Flask dev server）
+gevent==24.11.1          # gunicorn 异步 worker（支持高并发 IO）
+
+# --- HTTP / 网络 ---
+requests==2.32.3
+
+# --- 加密 ---
+pycryptodome==3.21.0     # 企微消息加解密
+cryptography==44.0.0
+
+# --- 腾讯云 ASR ---
+tencentcloud-sdk-python-asr==3.0.1312
+
+# --- HTML 解析 ---
+beautifulsoup4==4.13.3
+
+# --- 环境变量 ---
+python-dotenv==1.0.1
+
+# --- 农历 ---
+cnlunar==0.2.1
+
+# --- Excel ---
+openpyxl==3.1.5

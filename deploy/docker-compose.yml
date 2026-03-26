@@ -12,11 +12,17 @@ services:
     volumes:
       # 持久化多用户数据（用户目录 + 系统数据 + 令牌 + 用量日志）
       - textagent_data:/app/data
+      # 持久化 cron 日志（可选，方便宿主机查看）
+      - textagent_cron_log:/var/log
     env_file:
       - ../src/.env
     environment:
       - DATA_DIR=/app/data
       - PROCESS_ENDPOINT_URL=http://127.0.0.1:9000/process
+      # gunicorn 配置（Phase 1 引入 SQLite 后可增加 GUNICORN_WORKERS）
+      - GUNICORN_WORKERS=1
+      - GUNICORN_THREADS=4
 
 volumes:
   textagent_data:
+  textagent_cron_log:

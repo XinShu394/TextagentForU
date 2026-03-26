@@ -773,7 +773,54 @@ def api_admin_usage():
     """GET /api/admin/usage — LLM 用量统计"""
     _log(f"[WebAPI] /api/admin/usage")
 
-    # 读取 usage_log.jsonl
+    # ── SQLite 路径 ──
+    try:
+        from db import usage_logs as _db_usage_logs, db as _db
+    except ImportError:
+        _db_usage_logs = None
+
+    if _db_usage_logs is not None:
+        # 按用户汇总
+        user_rows = _db.fetchall(
+            """SELECT user_id, model,
+                      SUM(total_tokens) as total_tokens, COUNT(*) as call_count
+               FROM usage_logs GROUP BY user_id, model""")
+        user_stats = {}
+        total_tokens = 0
+        total_calls = 0
+        for row in user_rows:
+            r = dict(row)
+            uid = r.get("user_id", "unknown")
+            model = r.get("model", "unknown")
+            tt = r.get("total_tokens", 0)
+            cc = r.get("call_count", 0)
+            total_tokens += tt
+            total_calls += cc
+            if uid not in user_stats:
+                user_stats[uid] = {"total_tokens": 0, "call_count": 0, "models": {}}
+            user_stats[uid]["total_tokens"] += tt
+            user_stats[uid]["call_count"] += cc
+            if model not in user_stats[uid]["models"]:
+                user_stats[uid]["models"][model] = {"tokens": 0, "count": 0}
+            user_stats[uid]["models"][model]["tokens"] += tt
+            user_stats[uid]["models"][model]["count"] += cc
+
+        # 按日分组
+        daily_rows = _db.fetchall(
+            """SELECT SUBSTR(ts, 1, 10) as day,
+                      SUM(total_tokens) as tokens, COUNT(*) as calls
+               FROM usage_logs GROUP BY day ORDER BY day DESC""")
+        daily = {dict(r)["day"]: {"tokens": dict(r)["tokens"], "calls": dict(r)["calls"]}
+                 for r in daily_rows}
+
+        return jsonify({
+            "total_tokens": total_tokens,
+            "total_calls": total_calls,
+            "user_stats": user_stats,
+            "daily": daily,
+        })
+
+    # ── JSON 文件回退路径 ──
     entries = []
     try:
         if os.path.exists(USAGE_LOG_FILE):
@@ -852,6 +899,152 @@ def api_admin_stats():
     days = int(request.args.get("days", "14"))
     now = datetime.now(_BEIJING_TZ)
     cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    today_str = now.strftime("%Y-%m-%d")
+    month_str = now.strftime("%Y-%m")
+
+    # ── 尝试 SQLite 路径 ──
+    try:
+        from db import usage_logs as _db_usage_logs, decision_logs as _db_decision_logs, db as _db
+    except ImportError:
+        _db_usage_logs = _db_decision_logs = _db = None
+
+    if _db_usage_logs is not None and _db is not None:
+        # --- 1. Token 用量（SQLite）---
+        usage_rows = _db.fetchall(
+            """SELECT SUBSTR(ts, 1, 10) as day, model, user_id,
+                      SUM(prompt_tokens) as pt, SUM(completion_tokens) as ct,
+                      SUM(total_tokens) as tt, COUNT(*) as calls
+               FROM usage_logs WHERE ts >= ? GROUP BY day, model, user_id""",
+            (cutoff,))
+
+        token_daily = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
+        token_by_model = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
+        token_by_user = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
+
+        for row in usage_rows:
+            r = dict(row)
+            day, model, uid = r["day"], r.get("model", "unknown"), r.get("user_id", "unknown")
+            pt, ct, tt, calls = r.get("pt", 0), r.get("ct", 0), r.get("tt", 0), r.get("calls", 0)
+
+            for d in (token_daily[day],):
+                d["prompt"] += pt; d["completion"] += ct; d["total"] += tt; d["calls"] += calls
+            for d in (token_by_model[model],):
+                d["prompt"] += pt; d["completion"] += ct; d["total"] += tt; d["calls"] += calls
+            for d in (token_by_user[uid],):
+                d["prompt"] += pt; d["completion"] += ct; d["total"] += tt; d["calls"] += calls
+
+        today_stats = token_daily.get(today_str, {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
+
+        # 成本计算
+        total_cost = 0.0
+        for model, stats in token_by_model.items():
+            m = model.lower()
+            if "deepseek" in m:
+                total_cost += stats["prompt"] / 1e6 * 2 + stats["completion"] / 1e6 * 8
+            elif "vl" in m:
+                total_cost += stats["prompt"] / 1e6 * 3 + stats["completion"] / 1e6 * 9
+
+        today_cost = 0.0
+        today_row = _db.fetchall(
+            """SELECT model, SUM(prompt_tokens) as pt, SUM(completion_tokens) as ct
+               FROM usage_logs WHERE ts LIKE ? GROUP BY model""",
+            (f"{today_str}%",))
+        for row in today_row:
+            r = dict(row)
+            m = (r.get("model") or "").lower()
+            if "deepseek" in m:
+                today_cost += (r.get("pt") or 0) / 1e6 * 2 + (r.get("ct") or 0) / 1e6 * 8
+            elif "vl" in m:
+                today_cost += (r.get("pt") or 0) / 1e6 * 3 + (r.get("ct") or 0) / 1e6 * 9
+
+        month_cost = _db_usage_logs.get_monthly_cost(month_str)
+
+        # Prompt Token 分布
+        prompt_dist_rows = _db.fetchall(
+            """SELECT
+                 SUM(CASE WHEN prompt_tokens < 4000 THEN 1 ELSE 0 END) as lt4k,
+                 SUM(CASE WHEN prompt_tokens >= 4000 AND prompt_tokens < 8000 THEN 1 ELSE 0 END) as '4k_8k',
+                 SUM(CASE WHEN prompt_tokens >= 8000 AND prompt_tokens < 12000 THEN 1 ELSE 0 END) as '8k_12k',
+                 SUM(CASE WHEN prompt_tokens >= 12000 THEN 1 ELSE 0 END) as gt12k
+               FROM usage_logs WHERE ts >= ?""", (cutoff,))
+        if prompt_dist_rows:
+            pd = dict(prompt_dist_rows[0])
+            prompt_dist = {"lt4k": pd.get("lt4k", 0) or 0, "4k_8k": pd.get("4k_8k", 0) or 0,
+                           "8k_12k": pd.get("8k_12k", 0) or 0, "gt12k": pd.get("gt12k", 0) or 0}
+        else:
+            prompt_dist = {"lt4k": 0, "4k_8k": 0, "8k_12k": 0, "gt12k": 0}
+
+        # --- 2. 决策日志（SQLite）---
+        if _db_decision_logs is not None:
+            decision_rows = _db.fetchall(
+                """SELECT user_id, ts, skill, elapsed_s, input_type, action, has_reply
+                   FROM decision_logs WHERE ts >= ? ORDER BY ts DESC""",
+                (cutoff,))
+            decisions = [dict(r) for r in decision_rows]
+        else:
+            decisions = []
+
+        recent_decisions = decisions[:100]
+
+        latencies = [d.get("elapsed_s", 0) for d in decisions if d.get("elapsed_s")]
+        latency_stats = {}
+        if latencies:
+            latencies_sorted = sorted(latencies)
+            latency_stats = {
+                "avg": round(sum(latencies) / len(latencies), 1),
+                "p50": round(latencies_sorted[len(latencies_sorted) // 2], 1),
+                "p90": round(latencies_sorted[int(len(latencies_sorted) * 0.9)], 1),
+                "p99": round(latencies_sorted[int(len(latencies_sorted) * 0.99)], 1),
+                "max": round(max(latencies), 1),
+                "count": len(latencies),
+                "slow_15s": len([l for l in latencies if l > 15]),
+                "slow_8s": len([l for l in latencies if l > 8]),
+            }
+
+        skill_counts = defaultdict(int)
+        skill_by_user = defaultdict(lambda: defaultdict(int))
+        for d in decisions:
+            sk = d.get("skill", "unknown")
+            uid = d.get("user_id", "unknown")
+            skill_counts[sk] += 1
+            skill_by_user[uid][sk] += 1
+        skill_top = sorted(skill_counts.items(), key=lambda x: -x[1])[:15]
+
+        # --- 3. 错误日志聚合 ---
+        error_groups = _aggregate_error_logs()
+
+        return jsonify({
+            "token": {
+                "daily": dict(token_daily),
+                "by_model": dict(token_by_model),
+                "by_user": dict(token_by_user),
+                "today": today_stats,
+                "total_cost": round(total_cost, 2),
+                "today_cost": round(today_cost, 4),
+                "month_cost": round(month_cost, 2),
+                "prompt_dist": prompt_dist,
+            },
+            "latency": {
+                "recent": [{
+                    "ts": d.get("ts", ""),
+                    "user_id": d.get("user_id", ""),
+                    "skill": d.get("skill", ""),
+                    "elapsed_s": d.get("elapsed_s", 0),
+                    "input_type": d.get("input_type", ""),
+                    "action": d.get("action", ""),
+                    "has_reply": d.get("has_reply", False),
+                } for d in recent_decisions],
+                "stats": latency_stats,
+            },
+            "skills": {
+                "top": skill_top,
+                "by_user": {uid: dict(sk) for uid, sk in skill_by_user.items()},
+            },
+            "errors": error_groups,
+            "period_days": days,
+        })
+
+    # ── JSON 文件回退路径 ──
 
     # --- 1. 读取 usage_log.jsonl (Token 用量) ---
     usage_entries = []
@@ -875,7 +1068,6 @@ def api_admin_stats():
     token_daily = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
     token_by_model = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
     token_by_user = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
-    today_str = now.strftime("%Y-%m-%d")
 
     for e in usage_entries:
         day = e.get("ts", "")[:10]
@@ -900,10 +1092,8 @@ def api_admin_stats():
         token_by_user[uid]["total"] += tt
         token_by_user[uid]["calls"] += 1
 
-    # 今日汇总
     today_stats = token_daily.get(today_str, {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
 
-    # 成本估算 (DeepSeek: 输入¥2/M 输出¥8/M, Qwen Flash: 免费, Qwen VL: 输入¥3/M 输出¥9/M)
     total_cost = 0.0
     for model, stats in token_by_model.items():
         m = model.lower()
@@ -911,7 +1101,6 @@ def api_admin_stats():
             total_cost += stats["prompt"] / 1e6 * 2 + stats["completion"] / 1e6 * 8
         elif "vl" in m or "vl-max" in m:
             total_cost += stats["prompt"] / 1e6 * 3 + stats["completion"] / 1e6 * 9
-        # qwen-flash 免费
 
     today_cost = 0.0
     for e in usage_entries:
@@ -946,11 +1135,9 @@ def api_admin_stats():
     except Exception:
         pass
 
-    # 按时间倒排，取最近 100 条用于延迟瀑布图
     decisions.sort(key=lambda x: x.get("ts", ""), reverse=True)
     recent_decisions = decisions[:100]
 
-    # 延迟分布统计
     latencies = [d.get("elapsed_s", 0) for d in decisions if d.get("elapsed_s")]
     latency_stats = {}
     if latencies:
@@ -966,7 +1153,6 @@ def api_admin_stats():
             "slow_8s": len([l for l in latencies if l > 8]),
         }
 
-    # 技能频次统计
     skill_counts = defaultdict(int)
     skill_by_user = defaultdict(lambda: defaultdict(int))
     for d in decisions:
@@ -977,8 +1163,7 @@ def api_admin_stats():
 
     skill_top = sorted(skill_counts.items(), key=lambda x: -x[1])[:15]
 
-    # --- 3. 本月成本（用于预算预警） ---
-    month_str = now.strftime("%Y-%m")
+    # --- 3. 本月成本 ---
     month_cost = 0.0
     for e in usage_entries:
         if e.get("ts", "")[:7] == month_str:
@@ -990,7 +1175,7 @@ def api_admin_stats():
             elif "vl" in m:
                 month_cost += pt / 1e6 * 3 + ct / 1e6 * 9
 
-    # --- 4. Prompt Token 分布（膨胀检测） ---
+    # --- 4. Prompt Token 分布 ---
     prompt_dist = {"lt4k": 0, "4k_8k": 0, "8k_12k": 0, "gt12k": 0}
     for e in usage_entries:
         pt = e.get("prompt_tokens", 0)
@@ -1178,29 +1363,51 @@ def api_admin_user_detail(uid):
     # 3. 最近决策日志（最新 20 条）
     decisions = []
     try:
-        if os.path.exists(ctx.decision_log_file):
-            from collections import deque
-            with open(ctx.decision_log_file, "r", encoding="utf-8") as f:
-                recent = list(deque(f, maxlen=20))
-            for line in recent:
-                line = line.strip()
-                if line:
-                    try:
-                        d = json.loads(line)
-                        decisions.append({
-                            "ts": d.get("ts", ""),
-                            "input_type": d.get("input_type", ""),
-                            "input": (d.get("input", "") or "")[:100],
-                            "skill": d.get("skill", ""),
-                            "action": d.get("action", ""),
-                            "elapsed_s": d.get("elapsed_s", 0),
-                            "has_reply": d.get("has_reply", False),
-                            "thinking": (d.get("thinking", "") or "")[:200],
-                        })
-                    except json.JSONDecodeError:
-                        continue
-    except Exception as e:
-        _log(f"[WebAPI] 读取决策日志失败 {uid}: {e}")
+        from db import decision_logs as _db_decision_logs
+    except ImportError:
+        _db_decision_logs = None
+
+    if _db_decision_logs is not None:
+        try:
+            rows = _db_decision_logs.get_recent_decisions(user_id=uid, limit=20)
+            for d in rows:
+                decisions.append({
+                    "ts": d.get("ts", ""),
+                    "input_type": d.get("input_type", ""),
+                    "input": "",  # 隐私保护：不存储原文
+                    "skill": d.get("skill", ""),
+                    "action": d.get("action", ""),
+                    "elapsed_s": d.get("elapsed_s", 0),
+                    "has_reply": bool(d.get("has_reply", False)),
+                    "thinking": "",
+                })
+        except Exception as e:
+            _log(f"[WebAPI] 读取决策日志(SQLite)失败 {uid}: {e}")
+    else:
+        try:
+            if os.path.exists(ctx.decision_log_file):
+                from collections import deque
+                with open(ctx.decision_log_file, "r", encoding="utf-8") as f:
+                    recent = list(deque(f, maxlen=20))
+                for line in recent:
+                    line = line.strip()
+                    if line:
+                        try:
+                            d = json.loads(line)
+                            decisions.append({
+                                "ts": d.get("ts", ""),
+                                "input_type": d.get("input_type", ""),
+                                "input": (d.get("input", "") or "")[:100],
+                                "skill": d.get("skill", ""),
+                                "action": d.get("action", ""),
+                                "elapsed_s": d.get("elapsed_s", 0),
+                                "has_reply": d.get("has_reply", False),
+                                "thinking": (d.get("thinking", "") or "")[:200],
+                            })
+                        except json.JSONDecodeError:
+                            continue
+        except Exception as e:
+            _log(f"[WebAPI] 读取决策日志失败 {uid}: {e}")
     result["decisions"] = list(reversed(decisions))
 
     # 4. 存储用量
@@ -1236,21 +1443,38 @@ def api_admin_user_detail(uid):
     # 6. Token 消耗（该用户）
     token_usage = {"total_tokens": 0, "calls": 0}
     try:
-        if os.path.exists(USAGE_LOG_FILE):
-            with open(USAGE_LOG_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        e = json.loads(line)
-                        if e.get("user_id") == uid:
-                            token_usage["total_tokens"] += e.get("total_tokens", 0)
-                            token_usage["calls"] += 1
-                    except json.JSONDecodeError:
-                        continue
-    except Exception:
-        pass
+        from db import db as _db
+    except ImportError:
+        _db = None
+
+    if _db is not None:
+        try:
+            row = _db.fetchone(
+                """SELECT SUM(total_tokens) as total_tokens, COUNT(*) as calls
+                   FROM usage_logs WHERE user_id = ?""", (uid,))
+            if row:
+                r = dict(row)
+                token_usage["total_tokens"] = r.get("total_tokens", 0) or 0
+                token_usage["calls"] = r.get("calls", 0) or 0
+        except Exception:
+            pass
+    else:
+        try:
+            if os.path.exists(USAGE_LOG_FILE):
+                with open(USAGE_LOG_FILE, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            e = json.loads(line)
+                            if e.get("user_id") == uid:
+                                token_usage["total_tokens"] += e.get("total_tokens", 0)
+                                token_usage["calls"] += 1
+                        except json.JSONDecodeError:
+                            continue
+        except Exception:
+            pass
     result["token_usage"] = token_usage
 
     return jsonify(result)

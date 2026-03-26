@@ -1,0 +1,17 @@
+# ================================================================
+# TextAgent 定时调度 — 阿里云 ECS crontab
+# 所有任务通过 trigger.sh 调用 /system 端点
+# ================================================================
+
+# ─── 高频心跳 ───
+*/1  * * * *  /opt/textagent/trigger.sh todo_remind_tick       >> /var/log/textagent_cron.log 2>&1
+*/5  * * * *  /opt/textagent/trigger.sh scheduler_tick         >> /var/log/textagent_cron.log 2>&1
+2,32 * * * *  /opt/textagent/trigger.sh refresh_cache          >> /var/log/textagent_cron.log 2>&1
+
+# ─── 每日固定 ───
+0 5 * * *     /opt/textagent/trigger.sh daily_init             >> /var/log/textagent_cron.log 2>&1
+
+# ─── 低频定时 ───
+0 9 * * 1     /opt/textagent/trigger.sh weekly_review          >> /var/log/textagent_cron.log 2>&1
+0 9 1 * *     /opt/textagent/trigger.sh monthly_review         >> /var/log/textagent_cron.log 2>&1
+0 20 8 * *    /opt/textagent/trigger.sh finance_monthly_report >> /var/log/textagent_cron.log 2>&1
