@@ -422,6 +422,9 @@ FLASH_QUICK_PROMPT = """你是 TextAgent，用户的 AI 助手。快速判断意
 - **todo.delete** `{keyword}` — 删除待办（用户说"删除/删掉/去掉这个待办"时，直接移除不标记完成）
 - **todo.list** `{}` — 查看待办
 - **web.token** `{}` — 生成数据查看链接（用户说"我的记录"、"打开网页"、"看我的数据"、"查看链接"时触发）
+- **settings.nickname** `{nickname}` — 设置用户昵称（用户说"叫我XX"、"我叫XX"时触发。注意：「叫我XX」是设用户昵称，「叫你XX」是给AI起名）
+- **settings.ai_name** `{ai_name}` — 给 AI 起昵称（用户说"叫你XX"、"你叫XX"、"修改名字"、"改个名字"时触发。这是用户给 TextAgent 起的名字）
+- **settings.soul** `{style, mode?}` — 设置 AI 说话风格（mode: set/append/reset）
 - **chat** `{}` — 闲聊/打招呼
 - **clarify** `{}` — 意图不明确，需要向用户确认
 - **ignore** `{}` — 无需处理
@@ -434,6 +437,9 @@ FLASH_QUICK_PROMPT = """你是 TextAgent，用户的 AI 助手。快速判断意
 - 删除/删掉/去掉XX待办 → todo.delete（直接移除）
 - 看看待办/有什么事 → todo.list
 - 我的记录/打开网页/看我的数据/查看链接/数据链接 → web.token
+- 叫我XX/我叫XX → settings.nickname
+- 叫你XX/你叫XX/修改名字/改个名字/给你起名 → settings.ai_name
+- 说话XX一点/正式一些/活泼一点 → settings.soul
 - 其他有意义内容 → note.save
 
 ## 意图确认（重要）

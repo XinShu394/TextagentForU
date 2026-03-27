@@ -20,7 +20,7 @@ from user_context import (
     create_announcement, get_announcements, delete_announcement,
     create_feedback, get_feedbacks, reply_feedback,
 )
-from config import ADMIN_TOKEN, LOG_FILE_TEXTAGENTFORU
+from config import ADMIN_TOKEN, LOG_FILE_TEXTAGENTFORU, VERSION, VERSION_NAME, VERSION_DATE
 
 _BEIJING_TZ = timezone(timedelta(hours=8))
 
@@ -88,6 +88,12 @@ def _get_ctx(user_id):
 # 用户 API — /api/*
 # ============================================================
 
+@api_bp.route("/version")
+def api_version():
+    """GET /api/version — 返回版本信息（无需鉴权）"""
+    return jsonify({"version": VERSION, "version_name": VERSION_NAME, "version_date": VERSION_DATE})
+
+
 @api_bp.route("/auth/verify", methods=["POST"])
 def api_auth_verify():
     """POST /api/auth/verify — 验证令牌"""
@@ -118,6 +124,9 @@ def api_dashboard(user_id=None):
         "nickname": ctx.get_nickname() or user_id,
         "date": now.strftime("%Y-%m-%d"),
         "weekday": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()],
+        "version": VERSION,
+        "version_name": VERSION_NAME,
+        "version_date": VERSION_DATE,
     }
 
     # ---- 并行读取所有数据源（5 次 IO → 1 次并行） ----

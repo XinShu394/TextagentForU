@@ -41,6 +41,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <p class="text-center text-warm-500 text-xs mt-6 leading-relaxed">
       在企微中对 TextAgent 说<br>「给我查看链接」获取访问令牌
     </p>
+    <p id="ver-info" class="text-center text-warm-400 text-xs mt-4"></p>
   </div>
 <script>
 function loginApp() {
@@ -78,6 +79,10 @@ function loginApp() {
     }
   }
 }
+fetch('/api/version').then(r=>r.json()).then(d=>{
+  const el=document.getElementById('ver-info');
+  if(el&&d.version_name) el.textContent=d.version_name;
+}).catch(()=>{});
 </script>
 </body>
 </html>

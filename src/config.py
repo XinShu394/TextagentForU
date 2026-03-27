@@ -6,6 +6,11 @@ TextAgentForU 统一配置
 """
 import os
 
+# ============ 版本信息 ============
+VERSION = "0.2"
+VERSION_NAME = "V0.2 — Flash 快速响应 + Settings Skill 修复"
+VERSION_DATE = "2026-03-27"
+
 # ============ DeepSeek API (Tier 2/3: Main + Think) ============
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")

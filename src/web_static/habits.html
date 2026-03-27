@@ -238,6 +238,10 @@ function habitsApp() {
     }
   }
 }
+fetch('/api/version').then(r=>r.json()).then(d=>{
+  const el=document.getElementById('ver-info');
+  if(el&&d.version_name) el.textContent=d.version_name;
+}).catch(()=>{});
 </script>
 </body>
 </html>
