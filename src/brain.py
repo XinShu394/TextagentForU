@@ -886,7 +886,7 @@ def process(payload, send_fn=None, ctx=None):
         _log(f"[Brain] JSON 解析失败，原始: {llm_response[:300]}")
         if payload.get("type") != "system":
             _save_to_quick_notes(payload, state, ctx)
-        return {"reply": "已记录到 Obsidian"}
+        return {"reply": "嗯嗯，我听到了~ 不过我脑子转了一圈没转过来，你能换个说法吗？😊"}
 
     _log(f"[Brain] 决策: skill={decision.get('skill')}, thinking={decision.get('thinking', '')[:80]}")
     if decision.get("memory_updates"):
