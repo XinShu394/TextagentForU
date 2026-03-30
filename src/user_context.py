@@ -65,6 +65,9 @@ class UserContext:
     """
 
     def __init__(self, user_id: str):
+        # ---- 路径遍历防护：拒绝危险字符 ----
+        if not user_id or '..' in user_id or '/' in user_id or '\\' in user_id:
+            raise ValueError(f"非法 user_id: {user_id!r}")
         self.user_id = user_id
 
         # ---- 本地基础目录（所有用户都有，用于存放 user_config 等系统文件） ----
@@ -175,11 +178,15 @@ class UserContext:
         return self.config
 
     def save_user_config(self, config: dict):
-        """保存用户配置到本地文件，并更新内存缓存"""
+        """保存用户配置到本地文件（原子写），并更新内存缓存"""
         try:
             os.makedirs(os.path.dirname(self.user_config_file), exist_ok=True)
-            with open(self.user_config_file, "w", encoding="utf-8") as f:
+            tmp_file = self.user_config_file + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, self.user_config_file)
             self.config = config
         except Exception as e:
             _log(f"[UserContext] 保存 user_config 失败 {self.user_id}: {e}")
@@ -263,11 +270,15 @@ def _read_registry() -> dict:
 
 
 def _write_registry(registry: dict):
-    """写入用户注册表"""
+    """写入用户注册表（原子写：先写临时文件再重命名）"""
     try:
         os.makedirs(os.path.dirname(USER_REGISTRY_FILE), exist_ok=True)
-        with open(USER_REGISTRY_FILE, "w", encoding="utf-8") as f:
+        tmp_file = USER_REGISTRY_FILE + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(registry, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, USER_REGISTRY_FILE)
     except Exception as e:
         _log(f"[UserContext] 写入注册表失败: {e}")
 
@@ -601,11 +612,15 @@ def _read_tokens() -> dict:
 
 
 def _write_tokens(data: dict):
-    """写入令牌表"""
+    """写入令牌表（原子写）"""
     try:
         os.makedirs(os.path.dirname(TOKENS_FILE), exist_ok=True)
-        with open(TOKENS_FILE, "w", encoding="utf-8") as f:
+        tmp_file = TOKENS_FILE + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, TOKENS_FILE)
     except Exception as e:
         _log(f"[Tokens] 写入令牌表失败: {e}")
 

@@ -57,7 +57,7 @@ class PromptCache:
         # 3. 通过 IO 对象回源读取
         if io is None:
             from storage import create_storage
-            io = create_storage()
+            io = create_storage("local")
         content = io.read_text(file_path)
         if content is not None:
             with self._lock:

@@ -56,6 +56,7 @@ _alert_state = {
     "slow_count": 0,           # 连续慢请求计数
     "last_alert_time": {},     # {alert_type: timestamp} 同类告警冷却
 }
+_alert_lock = threading.Lock()
 
 
 def _send_admin_alert(alert_type, message):
@@ -68,16 +69,18 @@ def _send_admin_alert(alert_type, message):
         return
 
     now = _time.time()
-    last = _alert_state["last_alert_time"].get(alert_type, 0)
-    if now - last < ALERT_COOLDOWN_SECONDS:
-        _log(f"[Alert] 冷却中，跳过: {alert_type} (距上次{now - last:.0f}s)")
-        return
+    with _alert_lock:
+        last = _alert_state["last_alert_time"].get(alert_type, 0)
+        if now - last < ALERT_COOLDOWN_SECONDS:
+            _log(f"[Alert] 冷却中，跳过: {alert_type} (距上次{now - last:.0f}s)")
+            return
+        # 预先占位，防止并发重复发送
+        _alert_state["last_alert_time"][alert_type] = now
 
     try:
         from channel_router import send_alert
         results = send_alert(f"🚨 TextAgent 告警\n\n{message}")
         if any(ok for _, ok in results):
-            _alert_state["last_alert_time"][alert_type] = now
             _log(f"[Alert] 已推送: {alert_type}")
         else:
             _log(f"[Alert] 推送失败: {alert_type}")
@@ -90,18 +93,25 @@ def _check_and_alert(elapsed, user_id, skill, user_text, error=None):
     请求完成后检查是否需要告警。
     支持：慢请求（连续N次 > 阈值）、Traceback/异常、月度预算超限。
     """
+    try:
+        elapsed = float(elapsed) if elapsed else 0
+    except (TypeError, ValueError):
+        elapsed = 0
     # 1. 慢请求检测
     if elapsed > ALERT_SLOW_THRESHOLD:
-        _alert_state["slow_count"] += 1
-        if _alert_state["slow_count"] >= ALERT_SLOW_CONSECUTIVE:
+        with _alert_lock:
+            _alert_state["slow_count"] += 1
+            slow_count = _alert_state["slow_count"]
+        if slow_count >= ALERT_SLOW_CONSECUTIVE:
             _send_admin_alert("slow_request",
-                f"⏱ 连续 {_alert_state['slow_count']} 次慢请求 (>{ALERT_SLOW_THRESHOLD}s)\n"
+                f"⏱ 连续 {slow_count} 次慢请求 (>{ALERT_SLOW_THRESHOLD}s)\n"
                 f"最新: {elapsed:.1f}s\n"
                 f"用户: {user_id}\n"
                 f"技能: {skill}\n"
                 f"输入: {(user_text or '')[:50]}")
     else:
-        _alert_state["slow_count"] = 0  # 重置连续计数
+        with _alert_lock:
+            _alert_state["slow_count"] = 0  # 重置连续计数
 
     # 2. 异常告警
     if error:
@@ -112,8 +122,10 @@ def _check_and_alert(elapsed, user_id, skill, user_text, error=None):
             f"输入: {(user_text or '')[:50]}")
 
     # 3. 月度预算检查（每 50 次调用检查一次，避免频繁 IO）
-    _alert_state["_call_count"] = _alert_state.get("_call_count", 0) + 1
-    if _alert_state["_call_count"] % 50 == 0:
+    with _alert_lock:
+        _alert_state["_call_count"] = _alert_state.get("_call_count", 0) + 1
+        call_count = _alert_state["_call_count"]
+    if call_count % 50 == 0:
         _check_monthly_budget()
 
 
@@ -623,21 +635,29 @@ def build_system_prompt(state, ctx, prompt_futs=None, payload=None):
         mem = prompt_futs["mem"].result()
     else:
         mem = load_memory(ctx)
+    # 截断 memory 内容，控制 token 消耗
+    if mem and len(mem) > 3000:
+        mem = mem[:3000] + "\n...(记忆已截断)"
 
     recent = format_recent_messages(state)
     state_summary = _build_state_summary(state)
 
     # SOUL 支持用户自定义覆写
     soul = prompts.SOUL
+    # V14-fix: 动态替换 SOUL 中硬编码的 "TextAgent"
+    ai_name = ctx.get_user_config().get("ai_name", "")
+    if ai_name and ai_name != "TextAgent":
+        soul = soul.replace("TextAgent", ai_name)
     soul_override = ctx.get_soul_override()
     if soul_override:
         soul += f"\n\n## 用户自定义\n{soul_override}"
     nickname = ctx.get_nickname()
     if nickname:
         soul += f"\n- 称呼用户为「{nickname}」"
-    ai_name = ctx.get_user_config().get("ai_name", "")
-    if ai_name:
-        soul += f"\n- 用户给你起了昵称「{ai_name}」，在合适的时候可以用这个名字自称"
+    if ai_name and ai_name != "TextAgent":
+        soul += f"\n- 重要：用户给你起了名字叫「{ai_name}」，你必须用这个名字自称，不要说自己是 TextAgent"
+    elif ai_name:
+        soul += f"\n- 你的名字是「{ai_name}」"
 
     # 方案 C+A: 条件注入 RULES（V12: 传入 ctx 用于 admin 判断）
     is_system = payload and payload.get("type") == "system"
@@ -791,7 +811,8 @@ def process(payload, send_fn=None, ctx=None):
     # V13: Flash 快速响应模式 - 使用精简 Prompt
     goto_skill_exec = False  # 标记是否跳过完整 LLM 调用，直接执行 skill
     decision = None
-    
+    t_llm = t_state  # 兜底初始化，防止后续引用未赋值
+
     if model_tier == "flash" and not is_system:
         # 检查是否在打卡/反思状态，如果是则强制用 Main
         if state.get("checkin_pending") or state.get("reflect_pending"):
@@ -803,6 +824,11 @@ def process(payload, send_fn=None, ctx=None):
             nickname = ctx.get_nickname() if ctx else None
             if nickname:
                 flash_prompt += f"\n\n称呼用户为「{nickname}」"
+            # V14-fix: Flash 路径注入 ai_name，让 AI 正确自称
+            ai_name = ctx.get_user_config().get("ai_name", "") if ctx else ""
+            if ai_name and ai_name != "TextAgent":
+                flash_prompt = flash_prompt.replace("TextAgent", ai_name)
+                flash_prompt += f"\n\n重要：用户给你起了名字叫「{ai_name}」，你必须用这个名字自称，不要说自己是 TextAgent。"
             
             llm_response = call_llm([
                 {"role": "system", "content": flash_prompt},
@@ -939,7 +965,14 @@ def process(payload, send_fn=None, ctx=None):
             _log(f"[Brain] 兜底回复: skill={primary_skill} → '{reply}'")
 
     if reply:
-        add_message_to_state(state, "textagent", reply)
+        # V14-fix: 用动态 ai_name 替代硬编码 "textagent"
+        role_name = "textagent"
+        if ctx:
+            try:
+                role_name = ctx.get_user_config().get("ai_name", "textagent") or "textagent"
+            except Exception:
+                pass
+        add_message_to_state(state, role_name, reply)
 
     # 10. 先发回复（O-001：用户感知延迟优化），再保存 state/memory
     if send_fn and reply:
@@ -1225,8 +1258,17 @@ def _execute_steps(decision, state, registry, ctx):
         params = step.get("params", {})
 
         if skill_name == "note.save":
-            _log(f"[Brain] Step {i}: note.save 已由统一写入处理，跳过")
-            results.append({"skill": skill_name, "result": {"success": True}})
+            # 多步中的 note.save 直接通过 handler 执行（不再跳过）
+            handler = registry.get(skill_name)
+            if handler:
+                try:
+                    result = handler(params, state, ctx)
+                    results.append({"skill": skill_name, "result": result or {"success": True}})
+                except Exception as e:
+                    _log(f"[Brain] Step {i}: note.save 执行失败: {e}")
+                    results.append({"skill": skill_name, "result": {"success": False, "error": str(e)}})
+            else:
+                results.append({"skill": skill_name, "result": {"success": True}})
             continue
         if skill_name == "ignore":
             results.append({"skill": skill_name, "result": {"success": True}})
@@ -1440,10 +1482,10 @@ def _build_user_message(payload):
 
     if msg_type == "text":
         data = {"type": "text", "text": payload.get("text", "")}
-        # F1: 如果检测到 URL 并抓取了正文，传给 LLM
+        # F1: 如果检测到 URL 并抓取了正文，传给 LLM（截断到 1500 字符控制 token）
         page_content = payload.get("page_content", "")
         if page_content:
-            data["page_content"] = page_content
+            data["page_content"] = page_content[:1500]
             detected_url = payload.get("detected_url", "")
             if detected_url:
                 data["detected_url"] = detected_url
@@ -1482,10 +1524,10 @@ def _build_user_message(payload):
             "url": payload.get("url", ""),
             "description": payload.get("description", "")
         }
-        # F1: 如果有抓取到的网页正文，传给 LLM
+        # F1: 如果有抓取到的网页正文，传给 LLM（截断控制 token）
         page_content = payload.get("content", "")
         if page_content:
-            data["page_content"] = page_content
+            data["page_content"] = page_content[:1500]
         return json.dumps(data, ensure_ascii=False)
 
     elif msg_type == "system":

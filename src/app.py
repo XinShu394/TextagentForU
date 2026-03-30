@@ -24,6 +24,14 @@ import requests
 import threading
 import uuid
 import xml.etree.ElementTree as ET
+
+# XXE 防护：禁用外部实体解析
+# 注意：标准库 ET 默认不支持 DTD / 外部实体，但作为纵深防御仍做处理
+def _safe_parse_xml(xml_string):
+    """安全解析 XML 字符串，拒绝包含 DOCTYPE 声明的输入（防御 XXE）"""
+    if '<!DOCTYPE' in xml_string or '<!ENTITY' in xml_string:
+        raise ValueError("XML 包含 DOCTYPE/ENTITY 声明，已拒绝（XXE 防护）")
+    return ET.fromstring(xml_string)
 from datetime import datetime, timezone, timedelta
 
 from config import (
@@ -117,18 +125,21 @@ def _log(msg):
 
 # ============ 企微 access_token 缓存 ============
 _wework_token_cache = {"token": None, "expire_time": 0}
+_wework_token_lock = threading.Lock()
 
 
 def get_wework_access_token():
     now = time.time()
-    if _wework_token_cache["token"] and _wework_token_cache["expire_time"] > now:
-        return _wework_token_cache["token"]
+    with _wework_token_lock:
+        if _wework_token_cache["token"] and _wework_token_cache["expire_time"] > now:
+            return _wework_token_cache["token"]
     url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={CORP_ID}&corpsecret={CORP_SECRET}"
     resp = requests.get(url, timeout=10)
     result = resp.json()
     if result.get("errcode") == 0:
-        _wework_token_cache["token"] = result["access_token"]
-        _wework_token_cache["expire_time"] = now + result["expires_in"] - 200
+        with _wework_token_lock:
+            _wework_token_cache["token"] = result["access_token"]
+            _wework_token_cache["expire_time"] = now + result["expires_in"] - 200
         return result["access_token"]
     _log(f"[企微] token 获取失败: {result}")
     return None
@@ -159,27 +170,29 @@ def send_wework_message(user_id, content):
 # ============ 消息去重（带大小限制） ============
 _MSG_CACHE_MAX_SIZE = 2000
 _processed_msg_cache = {}
+_msg_cache_lock = threading.Lock()
 
 
 def is_duplicate_msg(msg_id):
     if not msg_id:
         return False
     now = time.time()
-    # 清理过期
-    expired = [k for k, v in _processed_msg_cache.items() if v < now]
-    for k in expired:
-        del _processed_msg_cache[k]
-    # 防止内存泄漏：超过上限时清除最早的一批
-    if len(_processed_msg_cache) >= _MSG_CACHE_MAX_SIZE:
-        oldest = sorted(_processed_msg_cache.items(), key=lambda x: x[1])[:_MSG_CACHE_MAX_SIZE // 4]
-        for k, _ in oldest:
+    with _msg_cache_lock:
+        # 清理过期
+        expired = [k for k, v in _processed_msg_cache.items() if v < now]
+        for k in expired:
             del _processed_msg_cache[k]
-        _log(f"[去重] 缓存超限，清理 {len(oldest)} 条旧记录")
-    if msg_id in _processed_msg_cache:
-        _log(f"[去重] 跳过: {msg_id}")
-        return True
-    _processed_msg_cache[msg_id] = now + MSG_CACHE_EXPIRE_SECONDS
-    return False
+        # 防止内存泄漏：超过上限时清除最早的一批
+        if len(_processed_msg_cache) >= _MSG_CACHE_MAX_SIZE:
+            oldest = sorted(_processed_msg_cache.items(), key=lambda x: x[1])[:_MSG_CACHE_MAX_SIZE // 4]
+            for k, _ in oldest:
+                del _processed_msg_cache[k]
+            _log(f"[去重] 缓存超限，清理 {len(oldest)} 条旧记录")
+        if msg_id in _processed_msg_cache:
+            _log(f"[去重] 跳过: {msg_id}")
+            return True
+        _processed_msg_cache[msg_id] = now + MSG_CACHE_EXPIRE_SECONDS
+        return False
 
 
 # ============ 媒体下载 ============
@@ -310,7 +323,7 @@ def _recognize_voice_sentence(audio_data):
 
 def parse_wechat_message(xml_data):
     """解析企微 XML 消息（含菜单 click 事件）"""
-    root = ET.fromstring(xml_data)
+    root = _safe_parse_xml(xml_data)
     msg_type = root.find('MsgType').text
     from_user = root.find('FromUserName').text
     result = {'msg_type': msg_type, 'from_user': from_user}
@@ -386,6 +399,18 @@ def _fetch_link_content(url):
     支持微信公众号文章、普通网页。截断到 2000 字符。
     """
     try:
+        # SSRF 防护：拒绝内网 IP、云元数据地址
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        _blocked_prefixes = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                             "172.20.", "172.21.", "172.22.", "172.23.",
+                             "172.24.", "172.25.", "172.26.", "172.27.",
+                             "172.28.", "172.29.", "172.30.", "172.31.",
+                             "192.168.", "127.", "0.", "169.254.")
+        if any(hostname.startswith(p) for p in _blocked_prefixes) or hostname in ("localhost", "metadata.google.internal"):
+            _log(f"[链接抓取] SSRF 拦截: {url[:80]}")
+            return ""
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                           'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -937,7 +962,7 @@ def wework():
             nonce = request.args.get('nonce', '')
 
             # 解密
-            root = ET.fromstring(xml_data)
+            root = _safe_parse_xml(xml_data)
             encrypt_node = root.find('Encrypt')
             if encrypt_node is not None:
                 decrypted_xml = wx_crypt.decrypt_msg(
@@ -994,9 +1019,30 @@ def wework():
     return "success"
 
 
+_INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
+
+
+def _is_internal_request():
+    """检查请求是否来自内部（本机回环 或 携带正确的 INTERNAL_SECRET）"""
+    # 1. 本机回环 IP 直接放行
+    remote = request.remote_addr or ""
+    if remote in ("127.0.0.1", "::1", "localhost"):
+        return True
+    # 2. Docker 网桥 IP（172.x.x.x）放行
+    if remote.startswith("172.") or remote.startswith("10."):
+        return True
+    # 3. 携带正确的 Secret Header 放行
+    if _INTERNAL_SECRET and request.headers.get("X-Internal-Secret") == _INTERNAL_SECRET:
+        return True
+    return False
+
+
 @app.route('/process', methods=['POST'])
 def process_endpoint():
     """内部异步处理端点：接收消息并调用 brain 处理"""
+    if not _is_internal_request():
+        _log(f"[/process] 拒绝外部请求: remote={request.remote_addr}")
+        return "forbidden", 403
     try:
         rid = _set_request_id()
         data = request.get_json(force=True)
@@ -1021,6 +1067,9 @@ def admin_menu():
     POST   → 创建/更新菜单
     DELETE → 删除菜单
     """
+    if not _is_internal_request():
+        _log(f"[/admin/menu] 拒绝外部请求: remote={request.remote_addr}")
+        return "forbidden", 403
     if request.method == 'GET':
         result = get_wework_menu()
         return json.dumps(result or {"error": "获取失败"}, ensure_ascii=False)
@@ -1035,6 +1084,9 @@ def admin_menu():
 @app.route('/system', methods=['POST'])
 def system_endpoint():
     """系统端点：定时器/手动触发的 system action（支持多用户遍历）"""
+    if not _is_internal_request():
+        _log(f"[/system] 拒绝外部请求: remote={request.remote_addr}")
+        return "forbidden", 403
     try:
         rid = _set_request_id()
         data = request.get_json(force=True)
@@ -1891,8 +1943,10 @@ def _add_minutes(time_str, minutes):
     return _add_minutes_v9(time_str, minutes)
 
 
-def _generate_daily_intents(state):
-    """V9: 基于用户节奏画像动态生成当天触达意图队列"""
+def _generate_daily_intents(state, ctx=None):
+    """V9: 基于用户节奏画像动态生成当天触达意图队列
+    V14-fix: 接入 preferences 过滤 + 晨报固定窗口 08:20-08:30
+    """
     sched = state.get("scheduler", {})
     rhythm = sched.get("user_rhythm", {})
     now = datetime.now(BEIJING_TZ)
@@ -1905,17 +1959,35 @@ def _generate_daily_intents(state):
         shift = rhythm.get("weekend_shift", SCHEDULER_WEEKEND_SHIFT)
         wake_time = _add_minutes(wake_time, shift)
 
-    intents = [
-        {
+    # V14-fix: 读取用户 preferences，决定哪些意图需要生成
+    preferences = {}
+    if ctx:
+        try:
+            user_config = ctx.get_user_config()
+            preferences = user_config.get("preferences", {})
+        except Exception as e:
+            _log(f"[V9] 读取 preferences 失败，使用默认值: {e}")
+    # 默认全开
+    morning_report_enabled = preferences.get("morning_report", True)
+    evening_checkin_enabled = preferences.get("evening_checkin", True)
+    companion_enabled = preferences.get("companion_enabled", True)
+
+    intents = []
+
+    # V14-fix: 晨报固定窗口 08:20-08:30（多用户场景 10 分钟窗口分批发送）
+    if morning_report_enabled:
+        intents.append({
             "type": "morning_report",
-            "earliest": wake_time,
-            "latest": _add_minutes(wake_time, 150),
-            "ideal": _add_minutes(wake_time, 30),
+            "earliest": "08:20",
+            "latest": "08:30",
+            "ideal": "08:20",
             "priority": "normal",
             "status": "pending"
-        },
-        # todo_remind 已改为独立的 1 分钟心跳驱动（todo_remind_tick），不再走意图队列
-        {
+        })
+
+    # todo_remind 已改为独立的 1 分钟心跳驱动（todo_remind_tick），不再走意图队列
+    if companion_enabled:
+        intents.append({
             "type": "companion",
             "earliest": _add_minutes(wake_time, 120),
             "latest": _add_minutes(sleep_time, -60),
@@ -1925,35 +1997,38 @@ def _generate_daily_intents(state):
             "sent_count": 0,
             "conditions": {"silent_hours": 4},
             "status": "pending"
-        },
-        {
-            "type": "nudge_check",
-            "earliest": "13:00",
-            "latest": "15:00",
-            "ideal": "14:00",
-            "priority": "low",
-            "status": "pending"
-        },
-        {
+        })
+
+    intents.append({
+        "type": "nudge_check",
+        "earliest": "13:00",
+        "latest": "15:00",
+        "ideal": "14:00",
+        "priority": "low",
+        "status": "pending"
+    })
+
+    if evening_checkin_enabled:
+        intents.append({
             "type": "evening_checkin",
             "earliest": _add_minutes(sleep_time, -120),
             "latest": _add_minutes(sleep_time, -30),
             "ideal": _add_minutes(sleep_time, -90),
             "priority": "normal",
             "status": "pending"
-        },
-        {
-            "type": "daily_report",
-            "earliest": _add_minutes(sleep_time, -90),
-            "latest": _add_minutes(sleep_time, -15),
-            "ideal": _add_minutes(sleep_time, -60),
-            "priority": "normal",
-            "status": "pending"
-        },
-    ]
+        })
+
+    intents.append({
+        "type": "daily_report",
+        "earliest": _add_minutes(sleep_time, -90),
+        "latest": _add_minutes(sleep_time, -15),
+        "ideal": _add_minutes(sleep_time, -60),
+        "priority": "normal",
+        "status": "pending"
+    })
 
     _log(f"[V9] 生成每日意图: wake={wake_time}, sleep={sleep_time}, "
-         f"weekend={is_weekend}, intents={len(intents)}")
+         f"weekend={is_weekend}, preferences={preferences}, intents={len(intents)}")
     return intents
 
 
@@ -1978,7 +2053,7 @@ def _daily_init(uid, ctx):
         _log(f"[V9][{uid}] daily_init 检测到已有执行中/已完成的意图队列，跳过覆盖")
         return {"skipped": True, "reason": "intents_already_active"}
 
-    intents = _generate_daily_intents(state)
+    intents = _generate_daily_intents(state, ctx=ctx)
 
     # 过期意图标记 skipped（容器重启等场景）
     # 【修复】对 morning_report 增加补发窗口：即使超过 latest，
@@ -2193,7 +2268,8 @@ def _rule_evaluate(intent, state, now):
     rhythm = sched.get("user_rhythm", {})
     avg_wake = rhythm.get("avg_wake_time", SCHEDULER_DEFAULT_WAKE)
     wake_min = safe_parse_hhmm(avg_wake, 0)
-    if now_min < wake_min:
+    # V14-fix: morning_report 有独立固定窗口（08:20-08:30），不受 avg_wake_time 二次阻塞
+    if intent_type != "morning_report" and now_min < wake_min:
         return "wait"
 
     if intent_type in ("companion", "nudge_check"):
