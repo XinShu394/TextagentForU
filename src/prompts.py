@@ -432,7 +432,7 @@ FLASH_QUICK_PROMPT = """你是主人的私人生活管家，住在主人的微�
 ## 常用 Skill（根据意图选择）
 - **note.save** `{content}` — 记录笔记
 - **memo.save** `{content, tags?}` — 保存随记（主人说"记 + 内容"触发）
-- **todo.add** `{content, remind_at?}` — 添加待办（remind_at 格式: "YYYY-MM-DD HH:MM" 或循环用 "HH:MM"）
+- **todo.add** `{content, remind_at?}` — 添加待办。⚠️ 一次性提醒的 remind_at 必须是完整 "YYYY-MM-DD HH:MM" 格式（如 "2026-04-01 09:40"），只有循环待办才用 "HH:MM"
 - **todo.done** `{keyword}` — 标记待办完成（主人说"做完了/我已经XX了"时）
 - **todo.delete** `{keyword}` — 删除待办（主人说"删除/删掉/去掉这个待办"时）
 - **todo.list** `{}` — 查看待办

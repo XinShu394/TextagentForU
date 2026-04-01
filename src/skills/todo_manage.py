@@ -522,7 +522,37 @@ def add(params, state, ctx):
 
     if ok:
         _log(f"[todo.add] 已添加: {content}" + (f" recur={recur}" if recur else ""))
-        return {"success": True, "state_updates": {"todos": todos}}
+        
+        # ── 生成明确的时间反馈，让用户确认待办被正确理解 ──
+        feedback_parts = []
+        if remind_at:
+            if len(remind_at) > 5:
+                # 一次性提醒：YYYY-MM-DD HH:MM → 显示完整时间
+                try:
+                    date_part, time_part = remind_at.split(" ")
+                    feedback_parts.append(f"已记下 {date_part} {time_part} 提醒你「{content}」")
+                except ValueError:
+                    feedback_parts.append(f"已记下 {remind_at} 提醒你「{content}」")
+            else:
+                # 循环提醒：只有 HH:MM
+                recur_text = _recur_display(todo)
+                feedback_parts.append(f"已记下{recur_text}提醒你「{content}」")
+        elif recur:
+            # 有循环但无具体时间
+            recur_text = _recur_display(todo)
+            feedback_parts.append(f"已记下{recur_text}「{content}」")
+        elif due_date:
+            # 只有截止日期
+            feedback_parts.append(f"已记下待办「{content}」，截止 {due_date}")
+        else:
+            # 普通待办，无时间
+            feedback_parts.append(f"已记下待办「{content}」")
+        
+        return {
+            "success": True, 
+            "state_updates": {"todos": todos},
+            "reply": feedback_parts[0] if feedback_parts else None
+        }
     else:
         return {"success": False, "reply": "写入 Todo.md 失败"}
 
